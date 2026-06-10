@@ -138,8 +138,8 @@ These conventions are enforced across the codebase. Follow them in all new code.
 ### Python
 
 - **Type hints:** Always annotate function arguments and return types using modern Python syntax (`list[str]` not `List[str]`)
-- **Dependency management:** `uv` (or pip via uv)
-- **Formatting & linting:** Black (line length 88); Ruff/Flake8 for linting
+- **Dependency management:** `uv` inside the Docker image (the base image ships with it). For **local development**, install into your conda env with plain pip — `python -m pip install -r requirements-dev.txt`. Don't run `uv pip install` against a conda env; uv treats it as a system Python and refuses unless pointed at it explicitly (`uv pip install --python "$env:CONDA_PREFIX\python.exe" ...`).
+- **Formatting & linting:** Ruff (line length 88) — `ruff format` for formatting (Black-compatible) and `ruff check` for linting. Config lives in `pyproject.toml`; dev tooling is pinned in `requirements-dev.txt`.
 - **Docstrings:** Google-style for all classes, modules, and public functions
 - **String formatting:** f-strings exclusively — no `.format()` or `%`
 - **Resource management:** Always use context managers (`with`) for file I/O or connections

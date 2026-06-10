@@ -3,7 +3,8 @@
 This module contains unit tests for the Retrieval-Augmented Generation service.
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from src.services.rag import RAGService
 
 
@@ -20,26 +21,32 @@ class TestRAGService:
         mock_embed_response = MagicMock()
         mock_embed_response.json.return_value = {"embedding": [0.1, 0.2, 0.3]}
         mock_embed_post.return_value = mock_embed_response
-        
+
         # Mock the LLM API response
         mock_llm_response = MagicMock()
-        mock_llm_response.json.return_value = {"response": "Emergency management involves coordinating response efforts."}
+        mock_llm_response.json.return_value = {
+            "response": "Emergency management involves coordinating response efforts."
+        }
         mock_llm_post.return_value = mock_llm_response
-        
+
         mock_session = MagicMock()
-        
+
         def create_mock_record(text_value):
             record = MagicMock()
-            record.__getitem__.side_effect = lambda key: text_value if key == "text" else None
+            record.__getitem__.side_effect = (
+                lambda key: text_value if key == "text" else None
+            )
             return record
-        
+
         mock_session.run.return_value = [
             create_mock_record("Emergency management is the process...")
         ]
 
         # Execute
         rag_service = RAGService()
-        result = rag_service.answer_question("What is emergency management?", mock_session)
+        result = rag_service.answer_question(
+            "What is emergency management?", mock_session
+        )
 
         # Assert
         assert result == "Emergency management involves coordinating response efforts."
@@ -64,7 +71,7 @@ class TestRAGService:
         mock_embed_response = MagicMock()
         mock_embed_response.json.return_value = {"embedding": [0.1, 0.2]}
         mock_embed_post.return_value = mock_embed_response
-        
+
         mock_session = MagicMock()
         mock_session.run.return_value = []
 
@@ -82,16 +89,18 @@ class TestRAGService:
         mock_embed_response = MagicMock()
         mock_embed_response.json.return_value = {"embedding": [0.1, 0.2]}
         mock_embed_post.return_value = mock_embed_response
-        
+
         mock_llm_post.side_effect = Exception("LLM service unavailable")
-        
+
         mock_session = MagicMock()
-        
+
         def create_mock_record(text_value):
             record = MagicMock()
-            record.__getitem__.side_effect = lambda key: text_value if key == "text" else None
+            record.__getitem__.side_effect = (
+                lambda key: text_value if key == "text" else None
+            )
             return record
-        
+
         mock_session.run.return_value = [create_mock_record("Some context")]
 
         rag_service = RAGService()
@@ -108,23 +117,25 @@ class TestRAGService:
         mock_embed_response = MagicMock()
         mock_embed_response.json.return_value = {"embedding": [0.1, 0.2]}
         mock_embed_post.return_value = mock_embed_response
-        
+
         mock_llm_response = MagicMock()
         mock_llm_response.json.return_value = {"response": "Synthesized answer"}
         mock_llm_post.return_value = mock_llm_response
-        
+
         mock_session = MagicMock()
-        
+
         def create_mock_record(text_value):
             record = MagicMock()
-            record.__getitem__.side_effect = lambda key: text_value if key == "text" else None
+            record.__getitem__.side_effect = (
+                lambda key: text_value if key == "text" else None
+            )
             return record
-        
+
         texts = ["Document 1 content", "Document 2 content", "Document 3 content"]
         mock_session.run.return_value = [create_mock_record(text) for text in texts]
 
         rag_service = RAGService()
-        result = rag_service.answer_question("test", mock_session)
+        rag_service.answer_question("test", mock_session)
 
         # Verify context was properly joined
         call_args = mock_llm_post.call_args
@@ -143,18 +154,20 @@ class TestRAGService:
         mock_embed_response = MagicMock()
         mock_embed_response.json.return_value = {"embedding": [0.1, 0.2]}
         mock_embed_post.return_value = mock_embed_response
-        
+
         mock_llm_response = MagicMock()
         mock_llm_response.json.return_value = {"response": "answer"}
         mock_llm_post.return_value = mock_llm_response
-        
+
         mock_session = MagicMock()
-        
+
         def create_mock_record(text_value):
             record = MagicMock()
-            record.__getitem__.side_effect = lambda key: text_value if key == "text" else None
+            record.__getitem__.side_effect = (
+                lambda key: text_value if key == "text" else None
+            )
             return record
-        
+
         mock_session.run.return_value = [create_mock_record("context")]
 
         rag_service = RAGService()
@@ -176,18 +189,20 @@ class TestRAGService:
         mock_embed_response = MagicMock()
         mock_embed_response.json.return_value = {"embedding": [0.1]}
         mock_embed_post.return_value = mock_embed_response
-        
+
         mock_llm_response = MagicMock()
         mock_llm_response.json.return_value = {"response": "answer"}
         mock_llm_post.return_value = mock_llm_response
-        
+
         mock_session = MagicMock()
-        
+
         def create_mock_record(text_value):
             record = MagicMock()
-            record.__getitem__.side_effect = lambda key: text_value if key == "text" else None
+            record.__getitem__.side_effect = (
+                lambda key: text_value if key == "text" else None
+            )
             return record
-        
+
         mock_session.run.return_value = [create_mock_record("context text")]
 
         rag_service = RAGService()

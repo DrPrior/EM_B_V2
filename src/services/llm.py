@@ -2,6 +2,7 @@ import json
 from collections.abc import Iterator
 
 import requests
+
 from src.core.config import settings
 
 

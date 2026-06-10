@@ -4,12 +4,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
-    
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
     )
-    
+
     ollama_base_url: str = Field(
         default="http://localhost:11434",
         description="Base URL for Ollama API",
@@ -40,11 +40,16 @@ class Settings(BaseSettings):
     )
     vector_retrieval_min_score: float = Field(
         default=0.75,
-        description="Minimum cosine similarity for vector chunks to be included in context",
+        description=(
+            "Minimum cosine similarity for vector chunks to be included in context"
+        ),
     )
     graph_retrieval_min_score: float = Field(
         default=0.78,
-        description="Minimum cosine similarity for graph-augmented chunks to be included in context",
+        description=(
+            "Minimum cosine similarity for graph-augmented chunks to be included "
+            "in context"
+        ),
     )
     graph_retrieval_limit: int = Field(
         default=3,

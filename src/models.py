@@ -62,7 +62,9 @@ class RelationshipResponse(BaseModel):
     type_name: str = Field(..., description="Relationship type")
     start_node_id: str = Field(..., description="Start node element ID")
     end_node_id: str = Field(..., description="End node element ID")
-    properties: dict = Field(default_factory=dict, description="Relationship properties")
+    properties: dict = Field(
+        default_factory=dict, description="Relationship properties"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

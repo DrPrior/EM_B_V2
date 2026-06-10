@@ -4,11 +4,8 @@ This module contains unit tests for the FastAPI app initialization, lifespan man
 and health check endpoint.
 """
 
-import pytest
-import importlib
-import sys
-import asyncio
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
 
 
@@ -56,9 +53,7 @@ class TestHealthCheckEndpoint:
         assert response.json() == {"status": "healthy"}
 
     @patch("src.database.connection.Neo4jConnection.get_instance")
-    def test_health_check_response_type(
-        self, mock_get_instance: MagicMock
-    ) -> None:
+    def test_health_check_response_type(self, mock_get_instance: MagicMock) -> None:
         """Test that health check returns correct response type.
 
         Args:

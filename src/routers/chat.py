@@ -1,11 +1,15 @@
 import json
-from collections.abc import Iterator
-from typing import Generator
+from collections.abc import Generator, Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, status # type: ignore[import-untyped]
+from fastapi import (  # type: ignore[import-untyped]
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
 from fastapi.responses import StreamingResponse  # type: ignore[import-untyped]
+from neo4j import Session  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from neo4j import Session # type: ignore[import-untyped]
 
 from src.database.connection import Neo4jConnection
 from src.services.rag import RAGService
@@ -47,8 +51,13 @@ class Source(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str = Field(..., description="The LLM-generated answer.")
-    session_id: str = Field(..., description="Session UUID — pass this in follow-up questions.")
-    sources: list[Source] = Field(default_factory=list, description="Documents used to generate the answer.")
+    session_id: str = Field(
+        ..., description="Session UUID — pass this in follow-up questions."
+    )
+    sources: list[Source] = Field(
+        default_factory=list,
+        description="Documents used to generate the answer.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -76,7 +85,10 @@ def chat_with_graph(
     request: ChatRequest,
     session: Session = Depends(get_db_session),
 ) -> ChatResponse:
-    """Answer a question using RAG. Pass the returned session_id to maintain conversation context."""
+    """Answer a question using RAG.
+
+    Pass the returned session_id to maintain conversation context.
+    """
     try:
         session_id, answer, sources = rag_service.answer_question(
             request.question, session, request.session_id
@@ -92,7 +104,7 @@ def chat_with_graph(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat request: {str(e)}",
-        )
+        ) from e
 
 
 @router.post("/stream")
@@ -118,10 +130,11 @@ def chat_stream(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to prepare stream: {str(e)}",
-        )
+        ) from e
 
     def event_stream() -> Iterator[str]:
-        yield f"data: {json.dumps({'type': 'metadata', 'session_id': sid, 'sources': sources})}\n\n"
+        metadata = {"type": "metadata", "session_id": sid, "sources": sources}
+        yield f"data: {json.dumps(metadata)}\n\n"
         try:
             for token in token_iter:
                 yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"

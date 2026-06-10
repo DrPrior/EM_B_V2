@@ -9,17 +9,18 @@ import re
 import sys
 import uuid
 from pathlib import Path  # type: ignore[import-untyped]
-from typing import Optional
 
+# Third-party imports
 from neo4j import Session  # type: ignore[import-untyped]
 
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
+# Local imports
 from src.core.config import settings
 from src.database.connection import Neo4jConnection
 from src.services.embeddings import embed_and_store_chunk
+
+# Add project root to Python path so local package imports work
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 
 # ==========================================
@@ -53,7 +54,7 @@ def discover_files(root_path: str) -> list[str]:
     return sorted(files)
 
 
-def read_file_content(file_path: str) -> Optional[str]:
+def read_file_content(file_path: str) -> str | None:
     """Read text content from a file.
 
     Supports plaintext, markdown, and PDF files.
@@ -69,7 +70,7 @@ def read_file_content(file_path: str) -> Optional[str]:
         suffix = path.suffix.lower()
 
         if suffix in {".txt", ".md"}:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return f.read()
 
         elif suffix == ".pdf":
@@ -140,9 +141,7 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def chunk_text(
-    text: str, max_chunk_size: int = 512, overlap: int = 64
-) -> list[str]:
+def chunk_text(text: str, max_chunk_size: int = 512, overlap: int = 64) -> list[str]:
     """Split text into overlapping chunks with semantic boundaries.
 
     Splits on sentence endings, newlines before headings/bullets, and blank
@@ -238,9 +237,7 @@ def create_directory_node(session: Session, path: str, name: str) -> None:
     MERGE (d:Directory {path: $path})
     ON CREATE SET d.name = $name
     """
-    session.execute_write(
-        lambda tx: tx.run(query, path=path, name=name)
-    )
+    session.execute_write(lambda tx: tx.run(query, path=path, name=name))
 
 
 def _link_directories(session: Session, parent_path: str, child_path: str) -> None:
@@ -261,9 +258,7 @@ def _link_directories(session: Session, parent_path: str, child_path: str) -> No
     )
 
 
-def create_directory_hierarchy(
-    session: Session, file_path: str, data_root: str
-) -> str:
+def create_directory_hierarchy(session: Session, file_path: str, data_root: str) -> str:
     """Create Directory nodes for every ancestor from data_root to the file's
     parent, linking each level with a CONTAINS_DIR relationship.
 
@@ -357,7 +352,9 @@ def create_chunk_node(
 # ==========================================
 
 
-def _print_progress(index: int, total: int, file_path: str, chunks: int, embeddings: int) -> None:
+def _print_progress(
+    index: int, total: int, file_path: str, chunks: int, embeddings: int
+) -> None:
     """Print a single-file progress line to the terminal.
 
     Args:
@@ -450,9 +447,7 @@ def ingest_project_data(
 
         # Create document node
         try:
-            create_document_node(
-                session, dir_path_str, file_path, filename, extension
-            )
+            create_document_node(session, dir_path_str, file_path, filename, extension)
         except Exception as e:
             print(f"  ⚠️  [{index}/{total}] Document node failed: {e}")
             stats["errors"] += 1
@@ -461,7 +456,9 @@ def ingest_project_data(
         stats["files_processed"] += 1
 
         # Chunk the content and generate embeddings
-        chunks = chunk_text(content, settings.chunk_max_tokens, settings.chunk_overlap_tokens)
+        chunks = chunk_text(
+            content, settings.chunk_max_tokens, settings.chunk_overlap_tokens
+        )
         file_chunks = 0
         file_embeddings = 0
 

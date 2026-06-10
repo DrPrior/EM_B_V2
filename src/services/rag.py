@@ -57,7 +57,7 @@ LIMIT $limit
 
 
 class RAGService:
-    """Retrieval-Augmented Generation pipeline with vector + graph-augmented retrieval."""
+    """RAG pipeline with vector + graph-augmented retrieval."""
 
     def _retrieve_and_build_messages(
         self,
@@ -79,10 +79,14 @@ class RAGService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate embeddings: {str(e)}",
-            )
+            ) from e
 
         vector_records = list(
-            db_session.run(_VECTOR_QUERY, embedding=question_vector, top_k=settings.retrieval_top_k)
+            db_session.run(
+                _VECTOR_QUERY,
+                embedding=question_vector,
+                top_k=settings.retrieval_top_k,
+            )
         )
 
         graph_records: list = []
@@ -119,12 +123,14 @@ class RAGService:
             if cid not in seen_ids and text_key not in seen_texts:
                 seen_ids.add(cid)
                 seen_texts.add(text_key)
-                merged.append({
-                    "chunk_id": cid,
-                    "text": r["text"],
-                    "filename": r["filename"],
-                    "score": round(r["score"], 4),
-                })
+                merged.append(
+                    {
+                        "chunk_id": cid,
+                        "text": r["text"],
+                        "filename": r["filename"],
+                        "score": round(r["score"], 4),
+                    }
+                )
 
         for r in graph_records:
             cid = r["chunk_id"]
@@ -132,12 +138,14 @@ class RAGService:
             if cid not in seen_ids and text_key not in seen_texts:
                 seen_ids.add(cid)
                 seen_texts.add(text_key)
-                merged.append({
-                    "chunk_id": cid,
-                    "text": r["text"],
-                    "filename": r["filename"],
-                    "score": round(r["score"], 4),
-                })
+                merged.append(
+                    {
+                        "chunk_id": cid,
+                        "text": r["text"],
+                        "filename": r["filename"],
+                        "score": round(r["score"], 4),
+                    }
+                )
 
         sources = [{"filename": r["filename"], "score": r["score"]} for r in merged]
 
@@ -180,7 +188,7 @@ class RAGService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate response: {str(e)}",
-            )
+            ) from e
 
         conversation_store.add_turn(sid, question, answer)
         return sid, answer, sources

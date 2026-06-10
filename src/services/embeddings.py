@@ -1,18 +1,17 @@
 import requests
-from neo4j import ManagedTransaction, Session # type: ignore[import-untyped]
+from neo4j import ManagedTransaction, Session  # type: ignore[import-untyped]
+
 from src.core.config import settings
+
 
 def generate_embedding(text: str) -> list[float]:
     """Generates a vector embedding for a given string using Ollama's API."""
     url = f"{settings.ollama_base_url}/api/embeddings"
-    payload = {
-        "model": settings.embedding_model,
-        "prompt": text
-    }
-    
+    payload = {"model": settings.embedding_model, "prompt": text}
+
     response = requests.post(url, json=payload)
-    response.raise_for_status() # Raise an error if the request fails
-    
+    response.raise_for_status()  # Raise an error if the request fails
+
     # Ollama returns a JSON object with an 'embedding' array
     return response.json().get("embedding", [])
 
@@ -44,4 +43,6 @@ def embed_and_store_chunk(text: str, chunk_id: str, session: Session) -> None:
     """
     embedding_vector = generate_embedding(text)
     if embedding_vector:
-        session.execute_write(_store_embedding_tx, chunk_id=chunk_id, embedding=embedding_vector)
+        session.execute_write(
+            _store_embedding_tx, chunk_id=chunk_id, embedding=embedding_vector
+        )

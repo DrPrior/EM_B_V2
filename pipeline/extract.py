@@ -4,6 +4,7 @@ Calls the local Ollama model to extract structured entities from chunk text,
 and to classify documents into material type categories.
 """
 
+import importlib
 import json
 import re
 import sys
@@ -12,11 +13,12 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.services.llm import generate_response
+generate_response = importlib.import_module("src.services.llm").generate_response
 
 
 _ENTITY_PROMPT = """\
-Extract named entities from the text below. Return ONLY valid JSON — no explanation, no markdown fences.
+Extract named entities from the text below.
+Return ONLY valid JSON — no explanation, no markdown fences.
 
 Required schema:
 {{
@@ -27,9 +29,11 @@ Required schema:
 }}
 
 Definitions:
-- concepts: key topics, doctrines, technical terms, or domain-specific ideas (not generic words like "information" or "process")
+- concepts: key topics, doctrines, technical terms, or domain-specific ideas
+  (not generic words like "information" or "process")
 - organizations: named agencies, military units, companies, or governing bodies
-- legal_references: specific laws, regulations, directives, or orders (e.g. "AR 525-13", "DoD Directive 2000.12", "10 USC 12304")
+- legal_references: specific laws, regulations, directives, or orders
+  (e.g. "AR 525-13", "DoD Directive 2000.12", "10 USC 12304")
 - courses: named training programs or educational courses
 - Use empty arrays when nothing applies
 
@@ -38,13 +42,16 @@ Text:
 
 
 _MATERIAL_TYPE_PROMPT = """\
-Classify this document into exactly one material type. Return ONLY valid JSON — no explanation, no markdown fences.
+Classify this document into exactly one material type.
+Return ONLY valid JSON — no explanation, no markdown fences.
 
 Required schema: {{"material_type": "string"}}
 
 Valid values (pick the closest match):
-Training Manual, Policy Document, Standard Operating Procedure, Reference Guide,
-Course Curriculum, Legal Document, Report, Briefing, Handbook, Other
+Training Manual, Policy Document,
+Standard Operating Procedure, Reference Guide,
+Course Curriculum, Legal Document, Report,
+Briefing, Handbook, Other
 
 Filename: {filename}
 
@@ -71,7 +78,12 @@ def extract_entities(text: str) -> dict:
     legal_references (list[str]), courses (list[str]).
     All values are empty lists on failure.
     """
-    empty: dict = {"concepts": [], "organizations": [], "legal_references": [], "courses": []}
+    empty: dict = {
+        "concepts": [],
+        "organizations": [],
+        "legal_references": [],
+        "courses": [],
+    }
 
     prompt = _ENTITY_PROMPT.format(text=text[:3000])
     try:
@@ -82,20 +94,25 @@ def extract_entities(text: str) -> dict:
 
     return {
         "concepts": [
-            c.strip() for c in data.get("concepts", [])
+            c.strip()
+            for c in data.get("concepts", [])
             if isinstance(c, str) and c.strip()
         ],
         "organizations": [
             {"name": o["name"].strip(), "type": o.get("type", "").strip()}
             for o in data.get("organizations", [])
-            if isinstance(o, dict) and isinstance(o.get("name"), str) and o["name"].strip()
+            if isinstance(o, dict)
+            and isinstance(o.get("name"), str)
+            and o["name"].strip()
         ],
         "legal_references": [
-            r.strip() for r in data.get("legal_references", [])
+            r.strip()
+            for r in data.get("legal_references", [])
             if isinstance(r, str) and r.strip()
         ],
         "courses": [
-            c.strip() for c in data.get("courses", [])
+            c.strip()
+            for c in data.get("courses", [])
             if isinstance(c, str) and c.strip()
         ],
     }

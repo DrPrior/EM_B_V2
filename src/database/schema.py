@@ -1,5 +1,6 @@
 from typing import LiteralString
-from neo4j import Driver # type: ignore[import-untyped]
+
+from neo4j import Driver  # type: ignore[import-untyped]
 
 # ==========================================
 # 1. INITIALIZATION: Constraints & Indexes
@@ -9,20 +10,20 @@ from neo4j import Driver # type: ignore[import-untyped]
 
 # Ensure every directory path is unique
 CONSTRAINT_DIRECTORY = """
-CREATE CONSTRAINT unique_directory_path IF NOT EXISTS 
+CREATE CONSTRAINT unique_directory_path IF NOT EXISTS
 FOR (d:Directory) REQUIRE d.path IS UNIQUE;
 """
 
-# Ensure documents are uniquely identified (using file_name for this example, 
+# Ensure documents are uniquely identified (using file_name for this example,
 # though a full file_path or UUID is often better in practice)
 CONSTRAINT_DOCUMENT = """
-CREATE CONSTRAINT unique_document_filename IF NOT EXISTS 
+CREATE CONSTRAINT unique_document_filename IF NOT EXISTS
 FOR (d:Document) REQUIRE d.file_name IS UNIQUE;
 """
 
-#Add an index on the sequence_number so ordering chunks is fast
+# Add an index on the sequence_number so ordering chunks is fast
 INDEX_CHUNK_SEQUENCE = """
-CREATE INDEX chunk_sequence_idx IF NOT EXISTS 
+CREATE INDEX chunk_sequence_idx IF NOT EXISTS
 FOR (c:Chunk) ON (c.sequence_number);
 """
 
@@ -31,19 +32,24 @@ FOR (c:Chunk) ON (c.sequence_number);
 
 # Ensure domain-specific entities are not duplicated
 CONSTRAINT_ORGANIZATION = """
-CREATE CONSTRAINT unique_organization_name IF NOT EXISTS FOR (o:Organization) REQUIRE o.name IS UNIQUE;
+CREATE CONSTRAINT unique_organization_name IF NOT EXISTS
+FOR (o:Organization) REQUIRE o.name IS UNIQUE;
 """
 CONSTRAINT_CONCEPT = """
-CREATE CONSTRAINT unique_concept_name IF NOT EXISTS FOR (c:Concept) REQUIRE c.name IS UNIQUE;
+CREATE CONSTRAINT unique_concept_name IF NOT EXISTS
+FOR (c:Concept) REQUIRE c.name IS UNIQUE;
 """
 CONSTRAINT_LEGAL_REFERENCE = """
-CREATE CONSTRAINT unique_legal_ref_name IF NOT EXISTS FOR (l:LegalReference) REQUIRE l.name IS UNIQUE;
+CREATE CONSTRAINT unique_legal_ref_name IF NOT EXISTS
+FOR (l:LegalReference) REQUIRE l.name IS UNIQUE;
 """
 CONSTRAINT_COURSE = """
-CREATE CONSTRAINT unique_course_name IF NOT EXISTS FOR (c:Course) REQUIRE c.name IS UNIQUE;
+CREATE CONSTRAINT unique_course_name IF NOT EXISTS
+FOR (c:Course) REQUIRE c.name IS UNIQUE;
 """
 CONSTRAINT_MATERIAL_TYPE = """
-CREATE CONSTRAINT unique_material_name IF NOT EXISTS FOR (m:MaterialType) REQUIRE m.name IS UNIQUE;
+CREATE CONSTRAINT unique_material_name IF NOT EXISTS
+FOR (m:MaterialType) REQUIRE m.name IS UNIQUE;
 """
 
 # Add a vector index for chunk embeddings (dimensions match qwen3-embedding:4b: 2560)
@@ -178,6 +184,7 @@ WITH doc, c ORDER BY c.sequence
 WITH doc, collect(c.text)[0] AS first_chunk_text
 RETURN doc.filepath AS filepath, doc.filename AS filename, first_chunk_text
 """
+
 
 def setup_constraints(driver: Driver) -> None:
     """Executes the constraint queries against the database."""

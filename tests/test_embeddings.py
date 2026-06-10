@@ -3,8 +3,10 @@
 This module contains unit tests for embedding generation via Ollama API.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from src.services.embeddings import generate_embedding
 
 
@@ -85,9 +87,7 @@ class TestGenerateEmbedding:
         assert call_args[0][0] == expected_url
 
     @patch("src.services.embeddings.requests.post")
-    def test_generate_embedding_with_large_vector(
-        self, mock_post: MagicMock
-    ) -> None:
+    def test_generate_embedding_with_large_vector(self, mock_post: MagicMock) -> None:
         """Test embedding generation with large vector dimensions.
 
         Args:

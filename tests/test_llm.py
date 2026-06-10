@@ -3,8 +3,10 @@
 This module contains unit tests for LLM response generation via Ollama API.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from src.services.llm import generate_response
 
 
@@ -114,9 +116,7 @@ class TestGenerateResponse:
         assert payload["options"]["temperature"] == 0.3
 
     @patch("src.services.llm.requests.post")
-    def test_generate_response_with_long_prompt(
-        self, mock_post: MagicMock
-    ) -> None:
+    def test_generate_response_with_long_prompt(self, mock_post: MagicMock) -> None:
         """Test response generation with lengthy prompts.
 
         Args:

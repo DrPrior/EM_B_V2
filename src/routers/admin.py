@@ -1,6 +1,12 @@
-from typing import Generator
+from collections.abc import Generator
 
-from fastapi import APIRouter, Depends, HTTPException, status  # type: ignore[import-untyped]
+from fastapi import (  # type: ignore[import-untyped]
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    status,
+)
 from neo4j import Session  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
@@ -10,8 +16,10 @@ from src.database.connection import Neo4jConnection
 # Trigger ingestion from the host:
 #   curl.exe -s -X POST http://localhost:8000/admin/ingest | python -m json.tool
 #
-# To ingest a different directory:
-#   curl.exe -s -X POST http://localhost:8000/admin/ingest -H "Content-Type: application/json" -d "{\"data_root\": \"/app/project_data\"}" | python -m json.tool
+# To ingest a different directory, pass a JSON body with "data_root", e.g.:
+#   curl.exe -s -X POST http://localhost:8000/admin/ingest \
+#     -H "Content-Type: application/json" \
+#     -d "{\"data_root\": \"/app/project_data\"}" | python -m json.tool
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -37,7 +45,7 @@ def get_db_session() -> Generator[Session, None, None]:
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_200_OK)
 def trigger_ingestion(
-    request: IngestRequest = IngestRequest(),
+    request: IngestRequest = Body(default_factory=IngestRequest),
     session: Session = Depends(get_db_session),
 ) -> IngestResponse:
     """Run the ingestion pipeline against the specified data directory.
@@ -51,5 +59,5 @@ def trigger_ingestion(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ingestion failed: {str(e)}",
-        )
+        ) from e
     return IngestResponse(**stats)

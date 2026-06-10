@@ -1,10 +1,12 @@
 """Pytest configuration and shared fixtures.
 
-This module provides shared test configuration and reusable fixtures for all test modules.
+This module provides shared test configuration and reusable fixtures for all
+test modules.
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 @pytest.fixture
@@ -67,12 +69,12 @@ def sample_context_documents() -> list[dict[str, str]]:
             "that threaten society."
         },
         {
-            "text": "The Incident Command System (ICS) is a standardized organizational "
-            "structure for managing emergency response operations."
+            "text": "The Incident Command System (ICS) is a standardized "
+            "organizational structure for managing emergency response operations."
         },
         {
-            "text": "Emergency preparedness involves planning, training, and equipping to "
-            "effectively respond to emergencies."
+            "text": "Emergency preparedness involves planning, training, and "
+            "equipping to effectively respond to emergencies."
         },
     ]
 

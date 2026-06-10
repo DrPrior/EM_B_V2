@@ -7,10 +7,9 @@ and validates Cypher queries to prevent injection vulnerabilities.
 
 import os
 import threading
-from typing import Generator
+from collections.abc import Generator
 
-from neo4j import Driver, GraphDatabase, Session # type: ignore[import-untyped]
-from neo4j.exceptions import ServiceUnavailable # type: ignore[import-untyped]
+from neo4j import Driver, GraphDatabase, Session  # type: ignore[import-untyped]
 
 
 class Neo4jConnection:
@@ -53,8 +52,7 @@ class Neo4jConnection:
             )
         if not uri:
             raise ValueError(
-                "DB_URI environment variable is not set. "
-                "Format: 'bolt://hostname:7687'"
+                "DB_URI environment variable is not set. Format: 'bolt://hostname:7687'"
             )
 
         # Parse auth string: "username/password"
@@ -67,7 +65,9 @@ class Neo4jConnection:
             ) from e
 
         self._uri: str = uri
-        self._driver: Driver | None = GraphDatabase.driver(uri, auth=(username, password))
+        self._driver: Driver | None = GraphDatabase.driver(
+            uri, auth=(username, password)
+        )
 
     @classmethod
     def get_instance(cls) -> "Neo4jConnection":
@@ -117,8 +117,7 @@ class Neo4jConnection:
         """
         if self._driver is None:
             raise RuntimeError(
-                "Driver is not initialized or has been closed. "
-                "Cannot create a session."
+                "Driver is not initialized or has been closed. Cannot create a session."
             )
         return self._driver.session()
 
@@ -133,8 +132,7 @@ class Neo4jConnection:
         """
         if self._driver is None:
             raise RuntimeError(
-                "Driver is not initialized or has been closed. "
-                "Cannot retrieve driver."
+                "Driver is not initialized or has been closed. Cannot retrieve driver."
             )
         return self._driver
 
@@ -162,7 +160,11 @@ class Neo4jConnection:
 
         Usage:
             @app.get("/nodes")
-            def get_nodes(session: Session = Depends(Neo4jConnection.get_instance().get_session_dependency)):
+            def get_nodes(
+                session: Session = Depends(
+                    Neo4jConnection.get_instance().get_session_dependency
+                )
+            ):
                 # Use session for database operations
                 pass
 
@@ -175,8 +177,7 @@ class Neo4jConnection:
         """
         if self._driver is None:
             raise RuntimeError(
-                "Driver is not initialized or has been closed. "
-                "Cannot create a session."
+                "Driver is not initialized or has been closed. Cannot create a session."
             )
         session = self._driver.session()
         try:

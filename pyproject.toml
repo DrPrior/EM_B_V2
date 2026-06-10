@@ -1,0 +1,30 @@
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+# Lint application, pipeline, and test code only.
+src = ["src", "pipeline", "tests"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: isort, UP: pyupgrade, B: flake8-bugbear
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.ruff.lint.isort]
+# Group our own packages together regardless of which one is imported.
+known-first-party = ["src", "pipeline", "tests"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency-injection markers are called in argument defaults by design.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.File",
+    "fastapi.Form",
+]
+
+[tool.ruff.format]
+# Black-compatible defaults (double quotes, trailing commas, etc.)
+quote-style = "double"

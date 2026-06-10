@@ -11,9 +11,7 @@ from fastapi.staticfiles import StaticFiles  # type: ignore[import-untyped]
 
 from src.database.connection import Neo4jConnection
 from src.database.schema import setup_constraints
-from src.routers import chat, graph
-from src.routers import admin
-
+from src.routers import admin, chat, graph
 
 
 @asynccontextmanager
@@ -39,7 +37,7 @@ async def lifespan(app: FastAPI):
         connection = Neo4jConnection.get_instance()
         connection.verify_connectivity()
         print("✓ Neo4j connection initialized successfully")
-        
+
         setup_constraints(connection.get_driver())
         print("✓ Database schema constraints and indexes initialized")
     except ValueError as e:

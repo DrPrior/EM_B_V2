@@ -1,12 +1,15 @@
 """Tests for the chat router module.
 
-This module contains unit tests for chat endpoint request/response models and the chat route.
+This module contains unit tests for chat endpoint request/response models and
+the chat route.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+
 from src.routers.chat import ChatRequest, ChatResponse
 
 
@@ -96,11 +99,11 @@ class TestChatEndpoint:
             A tuple of (mock_session, mock_connection).
         """
         mock_session = MagicMock()
-        
+
         def session_generator():
             """Generator that yields a mocked session."""
             yield mock_session
-        
+
         connection = MagicMock()
         connection.get_session_dependency = session_generator
         return mock_session, connection

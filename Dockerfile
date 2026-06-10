@@ -6,9 +6,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt requirements-dev.txt ./
+COPY requirements.txt ./
 RUN uv venv && \
-    uv pip install -r requirements.txt -r requirements-dev.txt
+    uv pip install -r requirements.txt
 
 # Copy application code
 COPY src ./src

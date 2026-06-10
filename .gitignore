@@ -1,0 +1,50 @@
+.env
+.env.local
+project_data
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/settings.json
+EM_B_V1.code-workspace
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+pytest_output.log
+pytest.ini
+requirements-dev.txt
+test_results.txt
+
+
+# Docker
+.dockerignore
+
+# Build artifacts
+build/
+dist/
+*.so
+
+
+#test outputs and logs
+test_output.txt

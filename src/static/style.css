@@ -1,0 +1,81 @@
+/* ── Message bubbles ─────────────────────────────────────────────────────── */
+
+.assistant-bubble {
+  max-width: 42rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  border-top-left-radius: 0.125rem;
+  padding: 0.75rem 1rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  font-size: 0.875rem;
+  line-height: 1.625;
+  color: #374151;
+}
+
+.user-bubble {
+  max-width: 42rem;
+  background: #2563eb;
+  color: white;
+  border-radius: 1rem;
+  border-top-right-radius: 0.125rem;
+  padding: 0.75rem 1rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  font-size: 0.875rem;
+  line-height: 1.625;
+  white-space: pre-wrap;
+}
+
+/* ── Streaming cursor ────────────────────────────────────────────────────── */
+
+.cursor {
+  color: #94a3b8;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── Markdown inside assistant bubbles ───────────────────────────────────── */
+
+.assistant-bubble h1,
+.assistant-bubble h2,
+.assistant-bubble h3 {
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.assistant-bubble h1 { font-size: 1.1em; }
+.assistant-bubble h2 { font-size: 1.05em; }
+.assistant-bubble h3 { font-size: 1em; }
+
+.assistant-bubble p            { margin-bottom: 0.5em; }
+.assistant-bubble p:last-child { margin-bottom: 0; }
+
+.assistant-bubble ul,
+.assistant-bubble ol {
+  margin: 0.25em 0 0.5em 1.25em;
+}
+.assistant-bubble ul { list-style-type: disc; }
+.assistant-bubble ol { list-style-type: decimal; }
+.assistant-bubble li { margin-bottom: 0.125em; }
+
+.assistant-bubble strong { font-weight: 600; }
+.assistant-bubble em     { font-style: italic; }
+
+.assistant-bubble code {
+  background: #f1f5f9;
+  border-radius: 0.25rem;
+  padding: 0.1em 0.3em;
+  font-size: 0.85em;
+  font-family: ui-monospace, monospace;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }

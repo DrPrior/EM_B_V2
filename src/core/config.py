@@ -1,0 +1,55 @@
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application configuration loaded from environment variables."""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+    )
+    
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Base URL for Ollama API",
+    )
+    chat_model: str = Field(
+        default="gemma:latest",
+        description="Chat model name for Ollama",
+    )
+    embedding_model: str = Field(
+        default="qwen3-embedding:4b",
+        description="Embedding model name for Ollama",
+    )
+    max_history_turns: int = Field(
+        default=10,
+        description="Maximum number of conversation turns to retain per session",
+    )
+    retrieval_top_k: int = Field(
+        default=5,
+        description="Number of chunks to retrieve via vector search per query",
+    )
+    chunk_max_tokens: int = Field(
+        default=512,
+        description="Maximum token size per ingestion chunk (1 token ≈ 4 chars)",
+    )
+    chunk_overlap_tokens: int = Field(
+        default=64,
+        description="Token overlap between consecutive chunks during ingestion",
+    )
+    vector_retrieval_min_score: float = Field(
+        default=0.75,
+        description="Minimum cosine similarity for vector chunks to be included in context",
+    )
+    graph_retrieval_min_score: float = Field(
+        default=0.78,
+        description="Minimum cosine similarity for graph-augmented chunks to be included in context",
+    )
+    graph_retrieval_limit: int = Field(
+        default=3,
+        description="Maximum number of graph-augmented chunks to add per query",
+    )
+
+
+settings = Settings()

@@ -1,0 +1,68 @@
+services:
+  neo4j:
+    image: neo4j:latest
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH}
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH}
+      - DB_URI=bolt://neo4j:7687
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CHAT_MODEL=gemma:latest
+      - EMBEDDING_MODEL=qwen3-embedding:4b
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./pipeline:/app/pipeline
+      - ./project_data:/app/project_data
+      - ./tests:/app/tests
+
+
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./ollama-startup.sh:/ollama-startup.sh
+      - ./Modelfile:/Modelfile
+      - ./Modelfile.embeddings:/Modelfile.embeddings
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    entrypoint: ["/bin/sh", "/ollama-startup.sh"]
+    restart: unless-stopped
+    
+
+volumes:
+  neo4j_data:
+  ollama_data:

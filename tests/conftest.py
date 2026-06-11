@@ -1,94 +1,36 @@
-"""Pytest configuration and shared fixtures.
+"""Shared pytest fixtures for the EM_B_V2 test suite.
 
-This module provides shared test configuration and reusable fixtures for all
-test modules.
+Unit tests mock every external service (Neo4j, Ollama) so they run anywhere.
+Integration tests (marked ``integration``) talk to the live containers and are
+excluded from the default run — see ``pyproject.toml``.
 """
 
-from unittest.mock import MagicMock
+import os
 
 import pytest
 
 
 @pytest.fixture
-def mock_neo4j_session() -> MagicMock:
-    """Fixture providing a mocked Neo4j session.
-
-    Returns:
-        A mocked Neo4j session object with common methods.
-    """
-    session = MagicMock()
-    # Don't set a default return value here - let individual tests set it
-    session.close = MagicMock()
-    return session
-
-
-@pytest.fixture
-def mock_neo4j_connection() -> MagicMock:
-    """Fixture providing a mocked Neo4j connection.
-
-    Returns:
-        A mocked Neo4j connection object with driver and session methods.
-    """
-    connection = MagicMock()
-    connection.close = MagicMock()
-    connection.get_session_dependency = MagicMock()
-    return connection
-
-
-@pytest.fixture
-def sample_embedding_vector() -> list[float]:
-    """Fixture providing a sample embedding vector.
-
-    Returns:
-        A sample 2560-dimensional embedding vector normalized to unit length.
-    """
+def sample_embedding() -> list[float]:
+    """A 2560-dimensional embedding matching ``qwen3-embedding:4b`` output."""
     return [0.1] * 2560
 
 
 @pytest.fixture
-def sample_question() -> str:
-    """Fixture providing a sample question.
+def fake_record():
+    """Factory for objects that behave like Neo4j records (``record["key"]``).
 
-    Returns:
-        A sample emergency management question.
+    Neo4j ``Record`` objects support ``__getitem__`` by key, which a plain dict
+    already satisfies. This factory just makes intent explicit in tests.
     """
-    return "What are the principles of emergency management?"
+
+    def _make(**fields):
+        return dict(fields)
+
+    return _make
 
 
-@pytest.fixture
-def sample_context_documents() -> list[dict[str, str]]:
-    """Fixture providing sample context documents retrieved from knowledge graph.
-
-    Returns:
-        A list of sample document records as would be returned from Neo4j.
-    """
-    return [
-        {
-            "text": "Emergency Management is the discipline and profession of applying "
-            "science, technology, planning, and management to deal with extreme events "
-            "that threaten society."
-        },
-        {
-            "text": "The Incident Command System (ICS) is a standardized "
-            "organizational structure for managing emergency response operations."
-        },
-        {
-            "text": "Emergency preparedness involves planning, training, and "
-            "equipping to effectively respond to emergencies."
-        },
-    ]
-
-
-@pytest.fixture
-def sample_response() -> str:
-    """Fixture providing a sample LLM response.
-
-    Returns:
-        A sample response from the language model.
-    """
-    return (
-        "Emergency management is a comprehensive approach to managing disasters and "
-        "emergencies. The principles include: 1) Prevention and mitigation of risks, "
-        "2) Preparedness through planning and training, 3) Response to emergencies, "
-        "and 4) Recovery and restoration."
-    )
+@pytest.fixture(scope="session")
+def base_url() -> str:
+    """Base URL of the live API as seen from inside the api container."""
+    return os.environ.get("TEST_API_BASE_URL", "http://localhost:8000")

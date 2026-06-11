@@ -28,3 +28,13 @@ extend-immutable-calls = [
 [tool.ruff.format]
 # Black-compatible defaults (double quotes, trailing commas, etc.)
 quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Default run excludes integration tests (they require live Neo4j + Ollama).
+# Run them explicitly with `pytest -m integration` or everything with `pytest -m ""`.
+addopts = "-m 'not integration'"
+markers = [
+    "unit: fast, isolated tests with all external services mocked",
+    "integration: tests that hit the live Neo4j and Ollama services",
+]

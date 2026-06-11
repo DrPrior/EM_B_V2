@@ -234,7 +234,7 @@ def _query_search(tx: ManagedTransaction, search_term: str) -> list[Record]:
     """
     result = tx.run(
         "MATCH (n) "
-        "WHERE ANY(prop IN properties(n) | toString(prop) CONTAINS $search) "
+        "WHERE ANY(key IN keys(n) WHERE toString(n[key]) CONTAINS $search) "
         "RETURN elementId(n) as id, labels(n) as labels, properties(n) as props "
         "LIMIT 20",
         search=search_term,

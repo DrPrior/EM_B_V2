@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         description="Base URL for Ollama API",
     )
     chat_model: str = Field(
-        default="gemma:latest",
+        default="gemma4:12b",
         description="Chat model name for Ollama",
     )
     embedding_model: str = Field(

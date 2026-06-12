@@ -15,12 +15,18 @@ class Settings(BaseSettings):
         description="Base URL for Ollama API",
     )
     chat_model: str = Field(
-        default="gemma4:12b-it-qat",
-        description="Chat model name for Ollama",
+        default="chat-model",
+        description=(
+            "Chat model name for Ollama — the custom variant built from Modelfile "
+            "by ollama-startup.sh (FROM gemma4:12b-it-qat)"
+        ),
     )
     embedding_model: str = Field(
-        default="qwen3-embedding:4b",
-        description="Embedding model name for Ollama",
+        default="embedding-model",
+        description=(
+            "Embedding model name for Ollama — the custom variant built from "
+            "Modelfile.embeddings by ollama-startup.sh (FROM qwen3-embedding:4b)"
+        ),
     )
     max_history_turns: int = Field(
         default=10,

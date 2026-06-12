@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **FastAPI** app served by uvicorn, running inside Docker (`em_b_v1-api-1`)
 - **Neo4j** graph database — bolt on port 7687, browser on port 7474
-- **Ollama** — local LLM inference; `gemma4:12b-it-qat` for chat/entity extraction, `qwen3-embedding:4b` (2560-dim) for embeddings
+- **Ollama** — local LLM inference. The app calls custom Modelfile-built variants, not the base models directly: `chat-model` (FROM `gemma4:12b-it-qat`, `num_ctx 8192`) for chat/entity extraction, `embedding-model` (FROM `qwen3-embedding:4b`, 2560-dim) for embeddings. Variant names are set in `src/core/config.py`
 - **Static web UI** — chat interface served at `/` from `src/static/` (index.html, app.js, style.css)
 - All three services are declared in `docker-compose.yml` and must be running for the app to function
 
@@ -174,5 +174,5 @@ These conventions are enforced across the codebase. Follow them in all new code.
 - FastAPI connects to Neo4j at `bolt://neo4j:7687` — never `localhost`
 - All credentials via `.env` / environment directives — never hardcoded secrets
 - Neo4j has a `healthcheck`; the API service uses `depends_on` with `condition: service_healthy` for both Neo4j and Ollama
-- Ollama starts via `ollama-startup.sh`, which pulls `gemma4:12b-it-qat` and `qwen3-embedding:4b` then creates custom model variants from `Modelfile` and `Modelfile.embeddings`
+- Ollama starts via `ollama-startup.sh`, which pulls `gemma4:12b-it-qat` and `qwen3-embedding:4b` then creates the custom variants the app calls — `chat-model` from `Modelfile` and `embedding-model` from `Modelfile.embeddings`
 - GPU acceleration is declared in `docker-compose.yml` via nvidia device reservations for the Ollama service

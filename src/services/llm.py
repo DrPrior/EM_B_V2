@@ -13,7 +13,7 @@ def generate_response(prompt: str) -> str:
         "model": settings.chat_model,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": 0.3},
+        "options": {"temperature": 0.3, "num_ctx": 8192},
     }
     response = requests.post(url, json=payload)
     response.raise_for_status()
@@ -34,7 +34,7 @@ def generate_chat_response(messages: list[dict]) -> str:
         "model": settings.chat_model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0.3},
+        "options": {"temperature": 0.3, "num_ctx": 8192},
     }
     response = requests.post(url, json=payload)
     response.raise_for_status()
@@ -55,7 +55,7 @@ def generate_chat_stream(messages: list[dict]) -> Iterator[str]:
         "model": settings.chat_model,
         "messages": messages,
         "stream": True,
-        "options": {"temperature": 0.3},
+        "options": {"temperature": 0.3, "num_ctx": 8192},
     }
     with requests.post(url, json=payload, stream=True) as response:
         response.raise_for_status()

@@ -10,7 +10,7 @@ pytestmark = pytest.mark.unit
 def test_settings_defaults_match_documented_values() -> None:
     settings = Settings()
 
-    assert settings.chat_model == "gemma4:12b"
+    assert settings.chat_model == "gemma4:12b-it-qat"
     assert settings.embedding_model == "qwen3-embedding:4b"
     assert settings.max_history_turns == 10
     assert settings.retrieval_top_k == 5

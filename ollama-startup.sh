@@ -8,7 +8,7 @@ until ollama list > /dev/null 2>&1; do
 done
 
 # Pull models
-ollama pull gemma4:12b
+ollama pull gemma4:12b-it-qat
 ollama pull qwen3-embedding:4b
 ollama create chat-model -f /Modelfile
 ollama create embedding-model -f /Modelfile.embeddings

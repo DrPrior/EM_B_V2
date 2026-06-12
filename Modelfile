@@ -1,4 +1,4 @@
-FROM gemma4:12b
+FROM gemma4:12b-it-qat
 
 # QA/RAG-specific parameters
 PARAMETER temperature 0

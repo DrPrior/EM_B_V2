@@ -14,11 +14,11 @@ CREATE CONSTRAINT unique_directory_path IF NOT EXISTS
 FOR (d:Directory) REQUIRE d.path IS UNIQUE;
 """
 
-# Ensure documents are uniquely identified (using file_name for this example,
-# though a full file_path or UUID is often better in practice)
+# Ensure files are uniquely identified by their full path (the key MERGE_FILE
+# and the ingestion pipeline merge on — filename alone collides across directories)
 CONSTRAINT_FILE = """
-CREATE CONSTRAINT unique_File_filename IF NOT EXISTS
-FOR (d:File) REQUIRE d.file_name IS UNIQUE;
+CREATE CONSTRAINT unique_file_filepath IF NOT EXISTS
+FOR (d:File) REQUIRE d.filepath IS UNIQUE;
 """
 
 # Add an index on the sequence_number so ordering chunks is fast
@@ -71,6 +71,14 @@ CONSTRAINT_CATEGORY = """
 CREATE CONSTRAINT unique_category_name IF NOT EXISTS
 FOR (cat:Category) REQUIRE cat.name IS UNIQUE;
 """
+CONSTRAINT_TRANCHE = """
+CREATE CONSTRAINT unique_tranche_name IF NOT EXISTS
+FOR (t:Tranche) REQUIRE t.name IS UNIQUE;
+"""
+CONSTRAINT_ACCESS = """
+CREATE CONSTRAINT unique_access_level IF NOT EXISTS
+FOR (a:Access) REQUIRE a.level IS UNIQUE;
+"""
 
 # Add a vector index for chunk embeddings (dimensions match qwen3-embedding:4b: 2560)
 INDEX_VECTOR_CHUNK = """
@@ -105,6 +113,24 @@ MATCH (doc:File {filepath: $filepath})
 MERGE (c:Chunk {chunk_id: $chunk_id})
 ON CREATE SET c.text = $text, c.sequence = $sequence
 MERGE (doc)-[:HAS_CHUNK]->(c)
+"""
+
+# Look up existing File nodes by filename (filename is not unique across
+# directories, so this may return several filepaths).
+FIND_FILE_BY_FILENAME = """
+MATCH (f:File {filename: $filename})
+RETURN f.filepath AS filepath
+"""
+
+# Merge a File from manifest metadata. Unlike MERGE_FILE this does not require a
+# parent Directory, so it can create catalog entries for files not yet ingested.
+# When the real file is later ingested, the MERGE matches on filepath and chunks
+# are attached to the same node. title is always (re)set — the manifest is the
+# authoritative source for it.
+MERGE_CATALOG_FILE = """
+MERGE (f:File {filepath: $filepath})
+ON CREATE SET f.filename = $filename, f.extension = $extension
+SET f.title = $title
 """
 
 # ==========================================
@@ -168,6 +194,14 @@ ON CREATE SET v.description = $description
 
 MERGE_CATEGORY = """
 MERGE (cat:Category {name: $name})
+"""
+
+MERGE_TRANCHE = """
+MERGE (t:Tranche {name: $name})
+"""
+
+MERGE_ACCESS = """
+MERGE (a:Access {level: $level})
 """
 
 # ==========================================
@@ -234,6 +268,34 @@ MATCH (doc:File {filepath: $filepath})
 MATCH (v:Validated {name: $name})
 MERGE (doc)-[:HAS_VALIDATION]->(v)
 """
+LINK_FILE_TRANCHE = """
+MATCH (doc:File {filepath: $filepath})
+MATCH (t:Tranche {name: $name})
+MERGE (doc)-[:FROM_TRANCHE]->(t)
+"""
+LINK_FILE_ACCESS = """
+MATCH (doc:File {filepath: $filepath})
+MATCH (a:Access {level: $level})
+MERGE (doc)-[:HAS_ACCESS]->(a)
+"""
+
+# --- CURATED CROSS-DOCUMENT RELATIONSHIPS ---
+# File-to-file edges sourced from the manifest prose (supersession / duplicate
+# notes), matched by filename. Superseded files are NOT removed from retrieval —
+# the edge is informational so the chatbot can flag a source as historical.
+
+LINK_SUPERSEDES = """
+MATCH (newer:File {filename: $newer})
+MATCH (older:File {filename: $older})
+MERGE (newer)-[:SUPERSEDES]->(older)
+"""
+
+LINK_VARIANT_OF = """
+MATCH (variant:File {filename: $variant})
+MATCH (canonical:File {filename: $canonical})
+MERGE (variant)-[:VARIANT_OF]->(canonical)
+"""
+
 MARK_CHUNK_ENRICHED = """
 MATCH (c:Chunk {chunk_id: $chunk_id})
 SET c.enriched = true
@@ -277,6 +339,8 @@ def setup_constraints(driver: Driver) -> None:
         CONSTRAINT_EDITION_DATE,
         CONSTRAINT_VALIDATED,
         CONSTRAINT_CATEGORY,
+        CONSTRAINT_TRANCHE,
+        CONSTRAINT_ACCESS,
         INDEX_VECTOR_CHUNK,
     ]
 

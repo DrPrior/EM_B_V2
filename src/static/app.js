@@ -78,6 +78,10 @@ function renderSources(sources) {
         <div class="mt-1 ml-6 font-mono text-xs ${scoreClass(s.score)}">
           ${s.score.toFixed(4)}
         </div>
+        ${s.superseded_by ? `
+        <div class="mt-1 ml-6 text-xs text-amber-600 italic">
+          ⚠ Superseded by ${escape(s.superseded_by)} — shown for historical reference
+        </div>` : ''}
       </div>`)
     .join('');
 }

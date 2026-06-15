@@ -33,7 +33,10 @@ def test_chat_success(client: TestClient) -> None:
     body = resp.json()
     assert body["answer"] == "an answer"
     assert body["session_id"] == "sid-1"
-    assert body["sources"] == [{"filename": "a.pdf", "score": 0.9}]
+    # The Source model always serialises superseded_by (null when not superseded).
+    assert body["sources"] == [
+        {"filename": "a.pdf", "score": 0.9, "superseded_by": None}
+    ]
 
 
 def test_chat_empty_question_rejected(client: TestClient) -> None:

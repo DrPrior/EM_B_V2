@@ -167,6 +167,84 @@ def test_no_context_produces_fallback_prompt(isolated_store) -> None:
     assert "No relevant context" in messages[-1]["content"]
 
 
+def test_superseded_source_is_annotated_not_filtered(isolated_store) -> None:
+    service = RAGService()
+    db = MagicMock()
+    db.run.return_value = [
+        {
+            "chunk_id": "c1",
+            "text": "Older EOP guidance.",
+            "score": 0.9,
+            "filename": "CPG_101_V2.pdf",
+            "superseders": ["CPG-101: Developing & Maintaining EOPs"],
+        },
+    ]
+
+    with (
+        patch("src.services.rag.generate_embedding", return_value=[0.1] * 2560),
+        patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
+    ):
+        _, messages, sources = service._retrieve_and_build_messages("q", db, None)
+
+    # Still retrieved (not filtered) and flagged with the superseding title.
+    assert sources == [
+        {
+            "filename": "CPG_101_V2.pdf",
+            "score": 0.9,
+            "superseded_by": "CPG-101: Developing & Maintaining EOPs",
+        }
+    ]
+    content = messages[-1]["content"]
+    assert "SUPERSEDED by CPG-101: Developing & Maintaining EOPs" in content
+    assert "historical reference" in content
+    assert "Older EOP guidance." in content
+
+
+def test_non_superseded_source_omits_supersede_field(isolated_store) -> None:
+    service = RAGService()
+    db = MagicMock()
+    db.run.return_value = [
+        {
+            "chunk_id": "c1",
+            "text": "Current guidance.",
+            "score": 0.9,
+            "filename": "NIMS.pdf",
+            "superseders": [],
+        },
+    ]
+
+    with (
+        patch("src.services.rag.generate_embedding", return_value=[0.1] * 2560),
+        patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
+    ):
+        _, messages, sources = service._retrieve_and_build_messages("q", db, None)
+
+    assert sources == [{"filename": "NIMS.pdf", "score": 0.9}]
+    assert "SUPERSEDED" not in messages[-1]["content"]
+
+
+def test_multiple_superseders_deduped_and_joined(isolated_store) -> None:
+    service = RAGService()
+    db = MagicMock()
+    db.run.return_value = [
+        {
+            "chunk_id": "c1",
+            "text": "old",
+            "score": 0.9,
+            "filename": "old.pdf",
+            "superseders": ["Edition B", "Edition B", "Edition C"],
+        },
+    ]
+
+    with (
+        patch("src.services.rag.generate_embedding", return_value=[0.1] * 2560),
+        patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
+    ):
+        _, _, sources = service._retrieve_and_build_messages("q", db, None)
+
+    assert sources[0]["superseded_by"] == "Edition B / Edition C"
+
+
 def test_embedding_failure_raises_http_500(isolated_store) -> None:
     from fastapi import HTTPException
 

@@ -20,15 +20,26 @@ _SYSTEM_PROMPT = (
     "e.g. (Source: FEMA_Guide.pdf)\n"
     "- When multiple sources support the same point, synthesize them into a "
     "single statement and cite all sources used\n"
+    "- A source tagged SUPERSEDED is an older version kept for historical "
+    "reference. You may still cite it, but prefer the current version it names "
+    "and make the historical status clear when it matters\n"
     "- Be concise and accurate"
 )
+
+
+def _superseded_by(record: dict) -> str | None:
+    """Join the (deduped) titles of files that supersede a record's source."""
+    names = [n for n in (record.get("superseders") or []) if n]
+    return " / ".join(dict.fromkeys(names)) if names else None
 
 _VECTOR_QUERY = """
 CALL db.index.vector.queryNodes('chunk_vector_idx', $top_k, $embedding)
 YIELD node, score
-OPTIONAL MATCH (doc:Document)-[:HAS_CHUNK]->(node)
+OPTIONAL MATCH (doc:File)-[:HAS_CHUNK]->(node)
+OPTIONAL MATCH (newer:File)-[:SUPERSEDES]->(doc)
+WITH node, score, doc, collect(coalesce(newer.title, newer.filename)) AS superseders
 RETURN node.chunk_id AS chunk_id, node.text AS text, score,
-       coalesce(doc.filename, 'Unknown') AS filename
+       coalesce(doc.filename, 'Unknown') AS filename, superseders
 """
 
 _GRAPH_QUERY = """
@@ -48,9 +59,11 @@ AND (
 )
 WITH chunk, vector.similarity.cosine(chunk.embedding, $embedding) AS score
 WHERE score >= $min_score
-OPTIONAL MATCH (doc:Document)-[:HAS_CHUNK]->(chunk)
-RETURN DISTINCT chunk.chunk_id AS chunk_id, chunk.text AS text,
-       coalesce(doc.filename, 'Unknown') AS filename, score
+OPTIONAL MATCH (doc:File)-[:HAS_CHUNK]->(chunk)
+OPTIONAL MATCH (newer:File)-[:SUPERSEDES]->(doc)
+WITH chunk, score, doc, collect(coalesce(newer.title, newer.filename)) AS superseders
+RETURN chunk.chunk_id AS chunk_id, chunk.text AS text,
+       coalesce(doc.filename, 'Unknown') AS filename, score, superseders
 ORDER BY score DESC
 LIMIT $limit
 """
@@ -129,6 +142,7 @@ class RAGService:
                         "text": r["text"],
                         "filename": r["filename"],
                         "score": round(r["score"], 4),
+                        "superseded_by": _superseded_by(r),
                     }
                 )
 
@@ -144,13 +158,26 @@ class RAGService:
                         "text": r["text"],
                         "filename": r["filename"],
                         "score": round(r["score"], 4),
+                        "superseded_by": _superseded_by(r),
                     }
                 )
 
-        sources = [{"filename": r["filename"], "score": r["score"]} for r in merged]
+        sources = []
+        for r in merged:
+            source = {"filename": r["filename"], "score": r["score"]}
+            if r["superseded_by"]:
+                source["superseded_by"] = r["superseded_by"]
+            sources.append(source)
 
         if merged:
-            context_parts = [f"[Source: {r['filename']}]\n{r['text']}" for r in merged]
+            context_parts = []
+            for r in merged:
+                label = r["filename"]
+                if r["superseded_by"]:
+                    label += (
+                        f" — SUPERSEDED by {r['superseded_by']} (historical reference)"
+                    )
+                context_parts.append(f"[Source: {label}]\n{r['text']}")
             context = "\n\n".join(context_parts)
             user_content = f"Context:\n{context}\n\nQuestion: {question}"
         else:

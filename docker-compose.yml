@@ -65,6 +65,5 @@ services:
 
 volumes:
   neo4j_data:
-    external: true
-    name: em_b_v1_neo4j_data
+    name: em_b_v2_neo4j_data
   ollama_data:

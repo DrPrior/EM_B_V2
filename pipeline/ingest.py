@@ -31,7 +31,9 @@ sys.path.insert(0, str(project_root))
 def discover_files(root_path: str) -> list[str]:
     """Discover all readable files in the directory tree.
 
-    Supports plaintext (.txt, .md), PDF, Word (.docx), and PowerPoint (.pptx) files.
+    Supports plaintext (.txt, .md), PDF, Word (.docx), and PowerPoint (.pptx)
+    files. MANIFEST*.md files are corpus metadata (loaded by
+    ``pipeline.load_manifest``), not content, so they are excluded.
 
     Args:
         root_path: Root directory to traverse.
@@ -49,6 +51,9 @@ def discover_files(root_path: str) -> list[str]:
 
     for file_path in root.rglob("*"):
         if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+            name_upper = file_path.name.upper()
+            if name_upper.startswith("MANIFEST") and name_upper.endswith(".MD"):
+                continue  # corpus metadata, handled by pipeline.load_manifest
             files.append(str(file_path))
 
     return sorted(files)
@@ -210,12 +215,12 @@ def is_file_embedded(session: Session, file_path: str) -> bool:
         file_path: Absolute path of the file to check.
 
     Returns:
-        True if the Document exists and has at least one Chunk with a stored embedding.
+        True if the File exists and has at least one Chunk with a stored embedding.
     """
     result = session.execute_read(
         lambda tx: tx.run(
             """
-            MATCH (doc:Document {filepath: $filepath})-[:HAS_CHUNK]->(c:Chunk)
+            MATCH (doc:File {filepath: $filepath})-[:HAS_CHUNK]->(c:Chunk)
             WHERE c.embedding IS NOT NULL
             RETURN count(c) > 0 AS embedded
             """,
@@ -289,10 +294,10 @@ def create_directory_hierarchy(session: Session, file_path: str, data_root: str)
     return str(Path(file_path).parent)
 
 
-def create_document_node(
+def create_file_node(
     session: Session, dir_path: str, filepath: str, filename: str, extension: str
 ) -> None:
-    """Create or merge a Document node and link to parent Directory.
+    """Create or merge a File node and link to parent Directory.
 
     Args:
         session: Neo4j session.
@@ -303,7 +308,7 @@ def create_document_node(
     """
     query = """
     MATCH (d:Directory {path: $dir_path})
-    MERGE (doc:Document {filepath: $filepath})
+    MERGE (doc:File {filepath: $filepath})
     ON CREATE SET doc.filename = $filename, doc.extension = $extension
     MERGE (d)-[:CONTAINS_FILE]->(doc)
     """
@@ -321,7 +326,7 @@ def create_document_node(
 def create_chunk_node(
     session: Session, filepath: str, chunk_id: str, text: str, sequence: int
 ) -> None:
-    """Create a Chunk node and link to parent Document.
+    """Create a Chunk node and link to parent File.
 
     Args:
         session: Neo4j session.
@@ -331,7 +336,7 @@ def create_chunk_node(
         sequence: Sequence number (0-indexed).
     """
     query = """
-    MATCH (doc:Document {filepath: $filepath})
+    MATCH (doc:File {filepath: $filepath})
     MERGE (c:Chunk {chunk_id: $chunk_id})
     ON CREATE SET c.text = $text, c.sequence = $sequence
     MERGE (doc)-[:HAS_CHUNK]->(c)
@@ -445,11 +450,11 @@ def ingest_project_data(
             stats["errors"] += 1
             continue
 
-        # Create document node
+        # Create file node
         try:
-            create_document_node(session, dir_path_str, file_path, filename, extension)
+            create_file_node(session, dir_path_str, file_path, filename, extension)
         except Exception as e:
-            print(f"  ⚠️  [{index}/{total}] Document node failed: {e}")
+            print(f"  ⚠️  [{index}/{total}] File node failed: {e}")
             stats["errors"] += 1
             continue
 

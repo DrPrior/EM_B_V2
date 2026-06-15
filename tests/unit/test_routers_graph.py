@@ -27,7 +27,7 @@ def client(mock_session):
 def test_get_nodes_returns_list(client: TestClient, mock_session) -> None:
     mock_session.execute_read.return_value = [
         {"id": "4:a", "labels": ["Concept"], "props": {"name": "ICS"}},
-        {"id": "4:b", "labels": ["Document"], "props": {"filename": "f.pdf"}},
+        {"id": "4:b", "labels": ["File"], "props": {"filename": "f.pdf"}},
     ]
 
     resp = client.get("/graph/nodes")

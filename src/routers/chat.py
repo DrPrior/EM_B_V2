@@ -47,6 +47,13 @@ class ChatRequest(BaseModel):
 class Source(BaseModel):
     filename: str = Field(..., description="Source document filename.")
     score: float = Field(..., description="Cosine similarity score (0-1).")
+    superseded_by: str | None = Field(
+        default=None,
+        description=(
+            "Title of the current document that supersedes this source, if any. "
+            "Superseded sources are still returned (historical reference)."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):
@@ -96,7 +103,14 @@ def chat_with_graph(
         return ChatResponse(
             answer=answer,
             session_id=session_id,
-            sources=[Source(filename=s["filename"], score=s["score"]) for s in sources],
+            sources=[
+                Source(
+                    filename=s["filename"],
+                    score=s["score"],
+                    superseded_by=s.get("superseded_by"),
+                )
+                for s in sources
+            ],
         )
     except HTTPException:
         raise

@@ -60,12 +60,16 @@ CREATE CONSTRAINT unique_source_url IF NOT EXISTS
 FOR (s:Source) REQUIRE s.url IS UNIQUE;
 """
 CONSTRAINT_EDITION_DATE = """
-CREATE CONSTRAINT unique_edition_date IF NOT EXISTS
-FOR (e:Edition) REQUIRE e.date IS UNIQUE;
+CREATE CONSTRAINT unique_edition_value IF NOT EXISTS
+FOR (e:Edition) REQUIRE e.value IS UNIQUE;
 """
 CONSTRAINT_VALIDATED = """
-CREATE CONSTRAINT unique_validation IF NOT EXISTS
-FOR (v:Validated) REQUIRE v.date IS UNIQUE;
+CREATE CONSTRAINT unique_validation_name IF NOT EXISTS
+FOR (v:Validated) REQUIRE v.name IS UNIQUE;
+"""
+CONSTRAINT_CATEGORY = """
+CREATE CONSTRAINT unique_category_name IF NOT EXISTS
+FOR (cat:Category) REQUIRE cat.name IS UNIQUE;
 """
 
 # Add a vector index for chunk embeddings (dimensions match qwen3-embedding:4b: 2560)
@@ -91,7 +95,8 @@ ON CREATE SET d.name = $name
 MERGE_FILE = """
 MATCH (d:Directory {path: $dir_path})
 MERGE (doc:File {filepath: $filepath})
-ON CREATE SET doc.filename = $filename, doc.extension = $extension
+ON CREATE SET doc.filename = $filename, doc.extension = $extension,
+              doc.title = $title
 MERGE (d)-[:CONTAINS_FILE]->(doc)
 """
 
@@ -152,13 +157,17 @@ ON CREATE SET s.name = $name
 """
 
 MERGE_EDITION_DATE = """
-MERGE (e:Edition {date: $date})
+MERGE (e:Edition {value: $value})
 ON CREATE SET e.description = $description
 """
 
 MERGE_VALIDATED = """
 MERGE (v:Validated {name: $name})
 ON CREATE SET v.description = $description
+"""
+
+MERGE_CATEGORY = """
+MERGE (cat:Category {name: $name})
 """
 
 # ==========================================
@@ -208,12 +217,22 @@ MERGE (wim)-[:RELATES_TO]->(concept)
 LINK_SOURCE_URL = """
 MATCH (doc:File {filepath: $filepath})
 MATCH (source:Source {url: $url})
-MERGE (doc)-[:REFERENCES]->(source)
+MERGE (doc)-[:HAS_SOURCE]->(source)
 """
 LINK_EDITION_DATE = """
 MATCH (doc:File {filepath: $filepath})
-MATCH (edition:Edition {date: $date})
-MERGE (doc)-[:REFERENCES]->(edition)
+MATCH (edition:Edition {value: $value})
+MERGE (doc)-[:HAS_EDITION]->(edition)
+"""
+LINK_FILE_CATEGORY = """
+MATCH (doc:File {filepath: $filepath})
+MATCH (cat:Category {name: $name})
+MERGE (doc)-[:IN_CATEGORY]->(cat)
+"""
+LINK_DOC_VALIDATED = """
+MATCH (doc:File {filepath: $filepath})
+MATCH (v:Validated {name: $name})
+MERGE (doc)-[:HAS_VALIDATION]->(v)
 """
 MARK_CHUNK_ENRICHED = """
 MATCH (c:Chunk {chunk_id: $chunk_id})
@@ -257,6 +276,7 @@ def setup_constraints(driver: Driver) -> None:
         CONSTRAINT_SOURCE_URL,
         CONSTRAINT_EDITION_DATE,
         CONSTRAINT_VALIDATED,
+        CONSTRAINT_CATEGORY,
         INDEX_VECTOR_CHUNK,
     ]
 

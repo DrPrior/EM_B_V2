@@ -16,9 +16,9 @@ FOR (d:Directory) REQUIRE d.path IS UNIQUE;
 
 # Ensure documents are uniquely identified (using file_name for this example,
 # though a full file_path or UUID is often better in practice)
-CONSTRAINT_DOCUMENT = """
-CREATE CONSTRAINT unique_document_filename IF NOT EXISTS
-FOR (d:Document) REQUIRE d.file_name IS UNIQUE;
+CONSTRAINT_FILE = """
+CREATE CONSTRAINT unique_File_filename IF NOT EXISTS
+FOR (d:File) REQUIRE d.file_name IS UNIQUE;
 """
 
 # Add an index on the sequence_number so ordering chunks is fast
@@ -51,6 +51,22 @@ CONSTRAINT_MATERIAL_TYPE = """
 CREATE CONSTRAINT unique_material_name IF NOT EXISTS
 FOR (m:MaterialType) REQUIRE m.name IS UNIQUE;
 """
+CONSTRAINT_WHY_IT_MATTERS = """
+CREATE CONSTRAINT unique_why_it_matters_name IF NOT EXISTS
+FOR (w:WhyItMatters) REQUIRE w.name IS UNIQUE;
+"""
+CONSTRAINT_SOURCE_URL = """
+CREATE CONSTRAINT unique_source_url IF NOT EXISTS
+FOR (s:Source) REQUIRE s.url IS UNIQUE;
+"""
+CONSTRAINT_EDITION_DATE = """
+CREATE CONSTRAINT unique_edition_date IF NOT EXISTS
+FOR (e:Edition) REQUIRE e.date IS UNIQUE;
+"""
+CONSTRAINT_VALIDATED = """
+CREATE CONSTRAINT unique_validation IF NOT EXISTS
+FOR (v:Validated) REQUIRE v.date IS UNIQUE;
+"""
 
 # Add a vector index for chunk embeddings (dimensions match qwen3-embedding:4b: 2560)
 INDEX_VECTOR_CHUNK = """
@@ -72,15 +88,15 @@ MERGE (d:Directory {path: $path})
 ON CREATE SET d.name = $name
 """
 
-MERGE_DOCUMENT = """
+MERGE_FILE = """
 MATCH (d:Directory {path: $dir_path})
-MERGE (doc:Document {filepath: $filepath})
+MERGE (doc:File {filepath: $filepath})
 ON CREATE SET doc.filename = $filename, doc.extension = $extension
 MERGE (d)-[:CONTAINS_FILE]->(doc)
 """
 
 MERGE_CHUNK = """
-MATCH (doc:Document {filepath: $filepath})
+MATCH (doc:File {filepath: $filepath})
 MERGE (c:Chunk {chunk_id: $chunk_id})
 ON CREATE SET c.text = $text, c.sequence = $sequence
 MERGE (doc)-[:HAS_CHUNK]->(c)
@@ -125,6 +141,26 @@ MERGE_MATERIAL_TYPE = """
 MERGE (m:MaterialType {name: $name})
 """
 
+MERGE_WHY_IT_MATTERS = """
+MERGE (w:WhyItMatters {name: $name})
+ON CREATE SET w.description = $description
+"""
+
+MERGE_SOURCE_URL = """
+MERGE (s:Source {url: $url})
+ON CREATE SET s.name = $name
+"""
+
+MERGE_EDITION_DATE = """
+MERGE (e:Edition {date: $date})
+ON CREATE SET e.description = $description
+"""
+
+MERGE_VALIDATED = """
+MERGE (v:Validated {name: $name})
+ON CREATE SET v.description = $description
+"""
+
 # ==========================================
 # 5. SEMANTIC RELATIONSHIP QUERIES
 # ==========================================
@@ -148,17 +184,37 @@ MERGE (chunk)-[:CITES]->(ref)
 """
 
 LINK_DOC_COURSE = """
-MATCH (doc:Document {filepath: $filepath})
+MATCH (doc:File {filepath: $filepath})
 MATCH (course:Course {name: $name})
 MERGE (doc)-[:REFERENCES]->(course)
 """
 
 LINK_DOC_MATERIAL_TYPE = """
-MATCH (doc:Document {filepath: $filepath})
+MATCH (doc:File {filepath: $filepath})
 MATCH (mt:MaterialType {name: $name})
 MERGE (doc)-[:IS_TYPE]->(mt)
 """
+LINK_DOC_WHY_IT_MATTERS = """
+MATCH (doc:File {filepath: $filepath})
+MATCH (wim:WhyItMatters {name: $name})
+MERGE (doc)-[:EXPLAINS]->(wim)
+"""
 
+LINK_WHY_IT_MATTERS_CONCEPT = """
+MATCH (wim:WhyItMatters {name: $name})
+MATCH (concept:Concept {name: $concept_name})
+MERGE (wim)-[:RELATES_TO]->(concept)
+"""
+LINK_SOURCE_URL = """
+MATCH (doc:File {filepath: $filepath})
+MATCH (source:Source {url: $url})
+MERGE (doc)-[:REFERENCES]->(source)
+"""
+LINK_EDITION_DATE = """
+MATCH (doc:File {filepath: $filepath})
+MATCH (edition:Edition {date: $date})
+MERGE (doc)-[:REFERENCES]->(edition)
+"""
 MARK_CHUNK_ENRICHED = """
 MATCH (c:Chunk {chunk_id: $chunk_id})
 SET c.enriched = true
@@ -169,7 +225,7 @@ SET c.enriched = true
 # ==========================================
 
 FETCH_UNENRICHED_CHUNKS = """
-MATCH (doc:Document)-[:HAS_CHUNK]->(c:Chunk)
+MATCH (doc:File)-[:HAS_CHUNK]->(c:Chunk)
 WHERE c.enriched IS NULL
 RETURN c.chunk_id AS chunk_id, c.text AS text,
        doc.filepath AS filepath, doc.filename AS filename
@@ -177,7 +233,7 @@ ORDER BY doc.filepath, c.sequence
 """
 
 FETCH_DOCS_WITHOUT_MATERIAL_TYPE = """
-MATCH (doc:Document)
+MATCH (doc:File)
 WHERE NOT (doc)-[:IS_TYPE]->(:MaterialType)
 OPTIONAL MATCH (doc)-[:HAS_CHUNK]->(c:Chunk)
 WITH doc, c ORDER BY c.sequence
@@ -190,13 +246,17 @@ def setup_constraints(driver: Driver) -> None:
     """Executes the constraint queries against the database."""
     queries: list[LiteralString] = [
         CONSTRAINT_DIRECTORY,
-        CONSTRAINT_DOCUMENT,
+        CONSTRAINT_FILE,
         INDEX_CHUNK_SEQUENCE,
         CONSTRAINT_ORGANIZATION,
         CONSTRAINT_CONCEPT,
         CONSTRAINT_LEGAL_REFERENCE,
         CONSTRAINT_COURSE,
         CONSTRAINT_MATERIAL_TYPE,
+        CONSTRAINT_WHY_IT_MATTERS,
+        CONSTRAINT_SOURCE_URL,
+        CONSTRAINT_EDITION_DATE,
+        CONSTRAINT_VALIDATED,
         INDEX_VECTOR_CHUNK,
     ]
 

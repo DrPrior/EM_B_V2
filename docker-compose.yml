@@ -23,8 +23,8 @@ services:
       - NEO4J_AUTH=${NEO4J_AUTH}
       - DB_URI=bolt://neo4j:7687
       - OLLAMA_BASE_URL=http://ollama:11434
-      - CHAT_MODEL=gemma4:12b-it-qat
-      - EMBEDDING_MODEL=qwen3-embedding:4b
+      - CHAT_MODEL=chat-model
+      - EMBEDDING_MODEL=embedding-model
     depends_on:
       neo4j:
         condition: service_healthy
@@ -55,10 +55,16 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      # `ollama list` succeeds as soon as the daemon is up — well before
+      # ollama-startup.sh finishes pulling models. Gate on the custom variants
+      # (created last by the startup script) so dependents only start once
+      # embeddings/chat are actually usable. start_period covers the first-run
+      # ~10GB model pull; on later runs the models are cached and this passes fast.
+      test: ["CMD-SHELL", "ollama list | grep -q chat-model && ollama list | grep -q embedding-model"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 600s
     entrypoint: ["/bin/sh", "/ollama-startup.sh"]
     restart: unless-stopped
     

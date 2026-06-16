@@ -7,11 +7,18 @@ from src.core.config import Settings
 pytestmark = pytest.mark.unit
 
 
-def test_settings_defaults_match_documented_values() -> None:
+def test_settings_defaults_match_documented_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The container sets CHAT_MODEL/EMBEDDING_MODEL; clear them so this asserts
+    # the code defaults (the custom Modelfile variants) rather than the env.
+    monkeypatch.delenv("CHAT_MODEL", raising=False)
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
+
     settings = Settings()
 
-    assert settings.chat_model == "gemma4:12b-it-qat"
-    assert settings.embedding_model == "qwen3-embedding:4b"
+    assert settings.chat_model == "chat-model"
+    assert settings.embedding_model == "embedding-model"
     assert settings.max_history_turns == 10
     assert settings.retrieval_top_k == 5
     assert settings.chunk_max_tokens == 512

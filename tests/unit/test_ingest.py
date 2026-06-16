@@ -7,6 +7,7 @@ import pytest
 
 from pipeline.ingest import (
     chunk_text,
+    clear_file_chunks,
     discover_files,
     estimate_tokens,
     is_file_embedded,
@@ -93,3 +94,11 @@ def test_is_file_embedded_no_result() -> None:
     session.execute_read.return_value = None
 
     assert is_file_embedded(session, "/app/project_data/a.txt") is False
+
+
+def test_clear_file_chunks_issues_write() -> None:
+    session = MagicMock()
+
+    clear_file_chunks(session, "/app/project_data/a.txt")
+
+    session.execute_write.assert_called_once()

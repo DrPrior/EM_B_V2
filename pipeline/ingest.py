@@ -208,21 +208,25 @@ def chunk_text(text: str, max_chunk_size: int = 512, overlap: int = 64) -> list[
 
 
 def is_file_embedded(session: Session, file_path: str) -> bool:
-    """Return True if the file already has at least one embedded Chunk in Neo4j.
+    """Return True if every Chunk of the file already has a stored embedding.
+
+    A file counts as embedded only when it has at least one chunk AND none of
+    its chunks are missing an embedding. Partially-embedded files (e.g. a run
+    interrupted by an Ollama outage) return False so they get reprocessed.
 
     Args:
         session: Neo4j session.
         file_path: Absolute path of the file to check.
 
     Returns:
-        True if the File exists and has at least one Chunk with a stored embedding.
+        True if the File exists and all of its chunks have a stored embedding.
     """
     result = session.execute_read(
         lambda tx: tx.run(
             """
             MATCH (doc:File {filepath: $filepath})-[:HAS_CHUNK]->(c:Chunk)
-            WHERE c.embedding IS NOT NULL
-            RETURN count(c) > 0 AS embedded
+            WITH count(c) AS total, count(c.embedding) AS embedded
+            RETURN total > 0 AND total = embedded AS embedded
             """,
             filepath=file_path,
         ).single()
@@ -321,6 +325,24 @@ def create_file_node(
             extension=extension,
         )
     )
+
+
+def clear_file_chunks(session: Session, filepath: str) -> None:
+    """Delete any existing Chunk nodes for a file before re-chunking.
+
+    Ingest generates fresh chunk_ids on every run, so reprocessing a file
+    without clearing first would create duplicate chunks. Fully-embedded files
+    are skipped upstream, so this only runs for new or partially-embedded files.
+
+    Args:
+        session: Neo4j session.
+        filepath: Parent document filepath.
+    """
+    query = """
+    MATCH (doc:File {filepath: $filepath})-[:HAS_CHUNK]->(c:Chunk)
+    DETACH DELETE c
+    """
+    session.execute_write(lambda tx: tx.run(query, filepath=filepath))
 
 
 def create_chunk_node(
@@ -459,6 +481,10 @@ def ingest_project_data(
             continue
 
         stats["files_processed"] += 1
+
+        # Drop any chunks left by a previous incomplete run so reprocessing
+        # doesn't create duplicates (fully-embedded files are skipped above).
+        clear_file_chunks(session, file_path)
 
         # Chunk the content and generate embeddings
         chunks = chunk_text(

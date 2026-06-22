@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from neo4j import READ_ACCESS, WRITE_ACCESS
 
 import src.database.connection as connection_module
 from src.database.connection import Neo4jConnection
@@ -111,3 +112,30 @@ def test_session_dependency_yields_and_closes(valid_env) -> None:
             next(gen)
 
     mock_session.close.assert_called_once()
+    # Defaults to a write session.
+    mock_driver.session.assert_called_once_with(default_access_mode=WRITE_ACCESS)
+
+
+def test_session_dependency_read_mode_passes_access_mode(valid_env) -> None:
+    mock_driver = MagicMock()
+    mock_driver.session.return_value = MagicMock()
+    with patch.object(
+        connection_module.GraphDatabase, "driver", return_value=mock_driver
+    ):
+        conn = Neo4jConnection()
+        next(conn.get_session_dependency(access_mode=READ_ACCESS))
+
+    # Read-only routes (chat, graph) get a READ session so the server rejects
+    # any accidental write.
+    mock_driver.session.assert_called_once_with(default_access_mode=READ_ACCESS)
+
+
+def test_session_defaults_to_write_access(valid_env) -> None:
+    mock_driver = MagicMock()
+    with patch.object(
+        connection_module.GraphDatabase, "driver", return_value=mock_driver
+    ):
+        conn = Neo4jConnection()
+        conn.session()
+
+    mock_driver.session.assert_called_once_with(default_access_mode=WRITE_ACCESS)

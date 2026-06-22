@@ -6,6 +6,9 @@ services:
       - "7687:7687"
     environment:
       - NEO4J_AUTH=${NEO4J_AUTH}
+      # Cap every transaction at 5s server-side as a DoS guard. Ingestion/
+      # enrichment write one chunk per transaction, well under this budget.
+      - NEO4J_db_transaction_timeout=5s
     volumes:
       - neo4j_data:/data
     healthcheck:

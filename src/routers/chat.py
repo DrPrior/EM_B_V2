@@ -8,7 +8,7 @@ from fastapi import (  # type: ignore[import-untyped]
     status,
 )
 from fastapi.responses import StreamingResponse  # type: ignore[import-untyped]
-from neo4j import Session  # type: ignore[import-untyped]
+from neo4j import READ_ACCESS, Session  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.database.connection import Neo4jConnection
@@ -83,8 +83,11 @@ class HistoryResponse(BaseModel):
 
 
 def get_db_session() -> Generator[Session, None, None]:
+    # Chat retrieval is read-only — a READ session makes the server reject any
+    # accidental write (the closest equivalent to a read-only DB user, which
+    # Neo4j Community Edition cannot provide).
     connection = Neo4jConnection.get_instance()
-    yield from connection.get_session_dependency()
+    yield from connection.get_session_dependency(access_mode=READ_ACCESS)
 
 
 @router.post("/", response_model=ChatResponse)

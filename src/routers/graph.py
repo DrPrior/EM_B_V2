@@ -7,7 +7,7 @@ the Neo4j knowledge graph.
 from collections.abc import Generator
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from neo4j import ManagedTransaction, Record, Session
+from neo4j import READ_ACCESS, ManagedTransaction, Record, Session
 from pydantic import BaseModel, Field
 
 from src.database.connection import Neo4jConnection
@@ -23,12 +23,14 @@ def get_session() -> Generator[Session, None, None]:
     Yields a Neo4j session for each request and ensures cleanup after completion.
 
     Yields:
-        A Neo4j session for database operations.
+        A read-only Neo4j session for database operations.
 
     Raises:
         RuntimeError: If the Neo4j driver has been closed or is unavailable.
     """
-    yield from Neo4jConnection.get_instance().get_session_dependency()
+    yield from Neo4jConnection.get_instance().get_session_dependency(
+        access_mode=READ_ACCESS
+    )
 
 
 @router.get("/nodes", response_model=list[NodeResponse])

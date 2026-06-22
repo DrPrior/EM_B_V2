@@ -5,12 +5,14 @@ from fastapi import (  # type: ignore[import-untyped]
     APIRouter,
     Depends,
     HTTPException,
+    Request,
     status,
 )
 from fastapi.responses import StreamingResponse  # type: ignore[import-untyped]
 from neo4j import READ_ACCESS, Session  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from src.core.rate_limit import chat_rate_limit, limiter
 from src.database.connection import Neo4jConnection
 from src.services.rag import RAGService
 from src.services.session import Message, conversation_store
@@ -91,8 +93,10 @@ def get_db_session() -> Generator[Session, None, None]:
 
 
 @router.post("/", response_model=ChatResponse)
+@limiter.limit(chat_rate_limit)
 def chat_with_graph(
-    request: ChatRequest,
+    request: Request,
+    payload: ChatRequest,
     session: Session = Depends(get_db_session),
 ) -> ChatResponse:
     """Answer a question using RAG.
@@ -101,7 +105,7 @@ def chat_with_graph(
     """
     try:
         session_id, answer, sources = rag_service.answer_question(
-            request.question, session, request.session_id
+            payload.question, session, payload.session_id
         )
         return ChatResponse(
             answer=answer,
@@ -125,8 +129,10 @@ def chat_with_graph(
 
 
 @router.post("/stream")
+@limiter.limit(chat_rate_limit)
 def chat_stream(
-    request: ChatRequest,
+    request: Request,
+    payload: ChatRequest,
     session: Session = Depends(get_db_session),
 ) -> StreamingResponse:
     """Answer a question with a streaming SSE response.
@@ -139,7 +145,7 @@ def chat_stream(
     """
     try:
         sid, sources, token_iter = rag_service.stream_answer(
-            request.question, session, request.session_id
+            payload.question, session, payload.session_id
         )
     except HTTPException:
         raise

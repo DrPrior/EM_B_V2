@@ -145,6 +145,7 @@ All tuneable values are in `Settings` (pydantic-settings, reads from `.env`):
 | `chunk_max_tokens` | 512 | Ingestion chunk size (~4 chars/token) |
 | `chunk_overlap_tokens` | 64 | Overlap between consecutive chunks |
 | `max_history_turns` | 10 | Conversation turns retained per session |
+| `rate_limit_per_minute` | 20 | Max chat requests per client IP per minute (429 over limit) |
 
 ### Hot reload
 

@@ -8,7 +8,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI  # type: ignore[import-untyped]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-untyped]
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from src.core.rate_limit import limiter
 from src.database.connection import Neo4jConnection
 from src.database.schema import setup_constraints
 from src.routers import admin, chat, graph
@@ -65,6 +68,11 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Per-IP rate limiting: register the shared limiter and the 429 handler so the
+# @limiter.limit decorators on the chat endpoints take effect.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Include routers
 app.include_router(graph.router)

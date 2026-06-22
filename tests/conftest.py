@@ -10,6 +10,21 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Clear the shared rate limiter's counters before each test.
+
+    The limiter keeps per-IP request counts in memory for the process lifetime,
+    so without a reset the chat-endpoint tests would accumulate hits across tests
+    and eventually trip the limit. Each test starts from a clean slate.
+    """
+    from src.core.rate_limit import limiter
+
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
 @pytest.fixture
 def sample_embedding() -> list[float]:
     """A 2560-dimensional embedding matching ``qwen3-embedding:4b`` output."""

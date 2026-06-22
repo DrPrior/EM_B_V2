@@ -61,6 +61,13 @@ class Settings(BaseSettings):
         default=3,
         description="Maximum number of graph-augmented chunks to add per query",
     )
+    rate_limit_per_minute: int = Field(
+        default=20,
+        description=(
+            "Maximum chat requests allowed per client IP per minute before the "
+            "API returns HTTP 429 (protects the API and LLM budget)"
+        ),
+    )
 
 
 settings = Settings()

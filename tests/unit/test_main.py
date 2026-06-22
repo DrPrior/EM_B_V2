@@ -22,7 +22,10 @@ def test_health_endpoint(client: TestClient) -> None:
 
 
 def test_routers_are_registered() -> None:
-    paths = {route.path for route in app.routes}
+    # Use the OpenAPI schema rather than iterating app.routes: newer FastAPI
+    # keeps included routers as lazy _IncludedRouter wrappers without a .path,
+    # so the schema is the stable view of registered paths.
+    paths = set(app.openapi()["paths"].keys())
 
     assert "/health" in paths
     assert "/chat/" in paths

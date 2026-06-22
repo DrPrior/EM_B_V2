@@ -26,6 +26,7 @@ def test_settings_defaults_match_documented_values(
     assert settings.vector_retrieval_min_score == 0.75
     assert settings.graph_retrieval_min_score == 0.78
     assert settings.graph_retrieval_limit == 3
+    assert settings.rate_limit_per_minute == 20
 
 
 def test_settings_read_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:

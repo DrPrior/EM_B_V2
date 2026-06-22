@@ -232,9 +232,12 @@ def _query_search(tx: ManagedTransaction, search_term: str) -> list[Record]:
     Returns:
         List of records with matching nodes.
     """
+    # toStringOrNull (not toString) so array-valued properties such as a Chunk's
+    # `embedding` DoubleArray yield null instead of raising a TypeError; null
+    # CONTAINS ... is falsey, so those properties are simply skipped.
     result = tx.run(
         "MATCH (n) "
-        "WHERE ANY(key IN keys(n) WHERE toString(n[key]) CONTAINS $search) "
+        "WHERE ANY(key IN keys(n) WHERE toStringOrNull(n[key]) CONTAINS $search) "
         "RETURN elementId(n) as id, labels(n) as labels, properties(n) as props "
         "LIMIT 20",
         search=search_term,

@@ -76,6 +76,25 @@ class Settings(BaseSettings):
             "by the /files endpoint."
         ),
     )
+    entity_extraction_max_tokens: int = Field(
+        default=256,
+        description=(
+            "Token cap (num_predict) for the per-query entity-extraction LLM "
+            "call. The output is a small JSON object, so a low cap bounds its "
+            "latency without truncating typical results."
+        ),
+    )
+    timing_log_enabled: bool = Field(
+        default=True,
+        description=(
+            "Master switch for per-stage query timing logs. When false, the "
+            "timing helpers no-op so production can silence them."
+        ),
+    )
+    timing_log_level: str = Field(
+        default="INFO",
+        description="Log level for the 'em_b.timing' logger (e.g. DEBUG, INFO).",
+    )
 
 
 settings = Settings()

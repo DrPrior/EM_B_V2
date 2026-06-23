@@ -146,6 +146,16 @@ All tuneable values are in `Settings` (pydantic-settings, reads from `.env`):
 | `chunk_overlap_tokens` | 64 | Overlap between consecutive chunks |
 | `max_history_turns` | 10 | Conversation turns retained per session |
 | `rate_limit_per_minute` | 20 | Max chat requests per client IP per minute (429 over limit) |
+| `entity_extraction_max_tokens` | 256 | Token cap (`num_predict`) for the per-query entity-extraction LLM call |
+| `timing_log_enabled` | `True` | Master switch for per-stage query timing logs (`em_b.timing` logger) |
+| `timing_log_level` | `INFO` | Log level for the timing logger |
+
+Per-stage timing instrumentation lives in `src/core/timing.py`. When enabled,
+each chat query emits one `rag stages …` wall-clock line (embed / vector_query /
+extract_entities / graph_query) plus one `ollama call=… …` line per Ollama call
+carrying the model's internal `load`/`prompt_eval`/`eval` durations — all
+correlated by a short `sid`. Use these to attribute query latency and to confirm
+models stay warm (low `load=` ms) under `OLLAMA_KEEP_ALIVE`.
 
 ### Hot reload
 

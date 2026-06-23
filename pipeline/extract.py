@@ -14,6 +14,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 generate_response = importlib.import_module("src.services.llm").generate_response
+settings = importlib.import_module("src.core.config").settings
 
 
 _ENTITY_PROMPT = """\
@@ -71,8 +72,13 @@ def _parse_json(raw: str) -> dict:
         return {}
 
 
-def extract_entities(text: str) -> dict:
+def extract_entities(text: str, session_id: str | None = None) -> dict:
     """Extract concepts, organizations, legal references, and courses from chunk text.
+
+    Args:
+        text: The text to extract entities from.
+        session_id: Conversation id used to correlate timing logs (query-time
+            calls only; batch enrichment passes None).
 
     Returns a dict with keys: concepts (list[str]), organizations (list[dict]),
     legal_references (list[str]), courses (list[str]).
@@ -87,7 +93,12 @@ def extract_entities(text: str) -> dict:
 
     prompt = _ENTITY_PROMPT.format(text=text[:3000])
     try:
-        raw = generate_response(prompt)
+        raw = generate_response(
+            prompt,
+            session_id=session_id,
+            num_predict=settings.entity_extraction_max_tokens,
+            format_json=True,
+        )
         data = _parse_json(raw)
     except Exception:
         return empty
@@ -125,7 +136,7 @@ def extract_material_type(filename: str, excerpt: str) -> str:
     """
     prompt = _MATERIAL_TYPE_PROMPT.format(filename=filename, excerpt=excerpt[:2000])
     try:
-        raw = generate_response(prompt)
+        raw = generate_response(prompt, num_predict=64, format_json=True)
         data = _parse_json(raw)
         mt = data.get("material_type", "Other")
         return mt.strip() if isinstance(mt, str) and mt.strip() else "Other"

@@ -7,6 +7,7 @@ from neo4j import Session  # type: ignore[import-untyped]
 
 from pipeline.extract import extract_entities
 from src.core.config import settings
+from src.core.timing import log_rag_stages, timed
 from src.services.embeddings import generate_embedding
 from src.services.llm import generate_chat_response, generate_chat_stream
 from src.services.session import conversation_store
@@ -120,44 +121,51 @@ class RAGService:
             {"filename": str, "score": float} dicts.
         """
         sid, history = conversation_store.get_or_create(session_id)
+        stage_ms: dict[str, float] = {}
 
         try:
-            question_vector = generate_embedding(question)
+            with timed("embed", stage_ms):
+                question_vector = generate_embedding(question, session_id=sid)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate embeddings: {str(e)}",
             ) from e
 
-        vector_records = list(
-            db_session.run(
-                _VECTOR_QUERY,
-                embedding=question_vector,
-                top_k=settings.retrieval_top_k,
+        with timed("vector_query", stage_ms):
+            vector_records = list(
+                db_session.run(
+                    _VECTOR_QUERY,
+                    embedding=question_vector,
+                    top_k=settings.retrieval_top_k,
+                )
             )
-        )
 
         graph_records: list = []
         try:
-            entities = extract_entities(question)
+            with timed("extract_entities", stage_ms):
+                entities = extract_entities(question, session_id=sid)
             entity_names = [c for c in entities["concepts"]] + [
                 o["name"] for o in entities["organizations"]
             ]
             legal_names = entities["legal_references"]
 
             if entity_names or legal_names:
-                graph_records = list(
-                    db_session.run(
-                        _GRAPH_QUERY,
-                        entity_names=entity_names,
-                        legal_names=legal_names,
-                        embedding=question_vector,
-                        min_score=settings.graph_retrieval_min_score,
-                        limit=settings.graph_retrieval_limit,
+                with timed("graph_query", stage_ms):
+                    graph_records = list(
+                        db_session.run(
+                            _GRAPH_QUERY,
+                            entity_names=entity_names,
+                            legal_names=legal_names,
+                            embedding=question_vector,
+                            min_score=settings.graph_retrieval_min_score,
+                            limit=settings.graph_retrieval_limit,
+                        )
                     )
-                )
         except Exception:
             pass  # graph traversal is additive — degrade gracefully to vector-only
+
+        log_rag_stages(stage_ms, sid)
 
         seen_ids: set[str] = set()
         seen_texts: set[str] = set()
@@ -249,7 +257,7 @@ class RAGService:
         )
 
         try:
-            answer = generate_chat_response(messages)
+            answer = generate_chat_response(messages, session_id=sid)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -278,10 +286,13 @@ class RAGService:
             question, db_session, session_id
         )
 
+        # Generation timing for the streaming path comes from the llm.py stream
+        # `done`-chunk log (ollama call=chat …); the rag stages line above covers
+        # retrieval only.
         def _token_gen() -> Iterator[str]:
             tokens: list[str] = []
             try:
-                for token in generate_chat_stream(messages):
+                for token in generate_chat_stream(messages, session_id=sid):
                     tokens.append(token)
                     yield token
             finally:

@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from typing import cast
+from urllib.parse import quote
 
 from fastapi import HTTPException, status  # type: ignore[import-untyped]
 from neo4j import Session  # type: ignore[import-untyped]
@@ -44,6 +45,26 @@ def _superseded_by(record: dict) -> str | None:
     return " / ".join(dict.fromkeys(names)) if names else None
 
 
+def _file_url(filepath: str | None) -> str | None:
+    """Build a `/files/...` URL the UI can link to, from a File's filepath.
+
+    The stored filepath is the absolute path inside the container (under
+    ``settings.data_root``). We strip that root and return a URL-encoded path
+    served by the files router. Catalog-only nodes (no on-disk file) still get a
+    URL; the endpoint simply 404s if the file is absent.
+    """
+    if not filepath:
+        return None
+    root = settings.data_root.rstrip("/")
+    if filepath.startswith(root + "/"):
+        rel = filepath[len(root) + 1 :]
+    else:
+        rel = filepath.lstrip("/")
+    if not rel:
+        return None
+    return f"/files/{quote(rel)}"
+
+
 _VECTOR_QUERY = """
 CALL db.index.vector.queryNodes('chunk_vector_idx', $top_k, $embedding)
 YIELD node, score
@@ -51,7 +72,8 @@ OPTIONAL MATCH (doc:File)-[:HAS_CHUNK]->(node)
 OPTIONAL MATCH (newer:File)-[:SUPERSEDES]->(doc)
 WITH node, score, doc, collect(coalesce(newer.title, newer.filename)) AS superseders
 RETURN node.chunk_id AS chunk_id, node.text AS text, score,
-       coalesce(doc.filename, 'Unknown') AS filename, superseders
+       coalesce(doc.filename, 'Unknown') AS filename, doc.filepath AS filepath,
+       superseders
 """
 
 _GRAPH_QUERY = """
@@ -75,7 +97,8 @@ OPTIONAL MATCH (doc:File)-[:HAS_CHUNK]->(chunk)
 OPTIONAL MATCH (newer:File)-[:SUPERSEDES]->(doc)
 WITH chunk, score, doc, collect(coalesce(newer.title, newer.filename)) AS superseders
 RETURN chunk.chunk_id AS chunk_id, chunk.text AS text,
-       coalesce(doc.filename, 'Unknown') AS filename, score, superseders
+       coalesce(doc.filename, 'Unknown') AS filename, doc.filepath AS filepath,
+       score, superseders
 ORDER BY score DESC
 LIMIT $limit
 """
@@ -153,6 +176,7 @@ class RAGService:
                         "chunk_id": cid,
                         "text": r["text"],
                         "filename": r["filename"],
+                        "url": _file_url(r["filepath"]),
                         "score": round(r["score"], 4),
                         "superseded_by": _superseded_by(r),
                     }
@@ -169,6 +193,7 @@ class RAGService:
                         "chunk_id": cid,
                         "text": r["text"],
                         "filename": r["filename"],
+                        "url": _file_url(r["filepath"]),
                         "score": round(r["score"], 4),
                         "superseded_by": _superseded_by(r),
                     }
@@ -176,7 +201,7 @@ class RAGService:
 
         sources = []
         for r in merged:
-            source = {"filename": r["filename"], "score": r["score"]}
+            source = {"filename": r["filename"], "score": r["score"], "url": r["url"]}
             if r["superseded_by"]:
                 source["superseded_by"] = r["superseded_by"]
             sources.append(source)

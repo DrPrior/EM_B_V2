@@ -19,7 +19,13 @@ EMPTY_ENTITIES = {
 
 
 def _vector_record(chunk_id: str, text: str, score: float, filename: str) -> dict:
-    return {"chunk_id": chunk_id, "text": text, "score": score, "filename": filename}
+    return {
+        "chunk_id": chunk_id,
+        "text": text,
+        "score": score,
+        "filename": filename,
+        "filepath": f"/app/project_data/{filename}",
+    }
 
 
 @pytest.fixture
@@ -51,7 +57,9 @@ def test_vector_only_retrieval_builds_context(isolated_store) -> None:
     assert messages[0]["role"] == "system"
     assert "FEMA.pdf" in messages[-1]["content"]
     assert "Emergency management basics." in messages[-1]["content"]
-    assert sources == [{"filename": "FEMA.pdf", "score": 0.9}]
+    assert sources == [
+        {"filename": "FEMA.pdf", "score": 0.9, "url": "/files/FEMA.pdf"}
+    ]
 
 
 def test_vector_results_below_min_score_excluded(isolated_store) -> None:
@@ -68,7 +76,7 @@ def test_vector_results_below_min_score_excluded(isolated_store) -> None:
     ):
         _, _, sources = service._retrieve_and_build_messages("q", db, None)
 
-    assert sources == [{"filename": "a.pdf", "score": 0.9}]
+    assert sources == [{"filename": "a.pdf", "score": 0.9, "url": "/files/a.pdf"}]
 
 
 def test_graph_results_appended_after_vector(isolated_store) -> None:
@@ -81,6 +89,7 @@ def test_graph_results_appended_after_vector(isolated_store) -> None:
                 "chunk_id": "c2",
                 "text": "graph chunk",
                 "filename": "graph.pdf",
+                "filepath": "/app/project_data/graph.pdf",
                 "score": 0.88,
             }
         ],
@@ -100,8 +109,8 @@ def test_graph_results_appended_after_vector(isolated_store) -> None:
 
     assert db.run.call_count == 2  # vector + graph
     assert sources == [
-        {"filename": "vec.pdf", "score": 0.9},
-        {"filename": "graph.pdf", "score": 0.88},
+        {"filename": "vec.pdf", "score": 0.9, "url": "/files/vec.pdf"},
+        {"filename": "graph.pdf", "score": 0.88, "url": "/files/graph.pdf"},
     ]
 
 
@@ -115,6 +124,7 @@ def test_duplicate_chunk_id_deduped(isolated_store) -> None:
                 "chunk_id": "dup",
                 "text": "same text",
                 "filename": "graph.pdf",
+                "filepath": "/app/project_data/graph.pdf",
                 "score": 0.88,
             }
         ],
@@ -132,7 +142,7 @@ def test_duplicate_chunk_id_deduped(isolated_store) -> None:
     ):
         _, _, sources = service._retrieve_and_build_messages("q", db, None)
 
-    assert sources == [{"filename": "vec.pdf", "score": 0.9}]
+    assert sources == [{"filename": "vec.pdf", "score": 0.9, "url": "/files/vec.pdf"}]
 
 
 def test_graph_failure_degrades_to_vector_only(isolated_store) -> None:
@@ -149,7 +159,7 @@ def test_graph_failure_degrades_to_vector_only(isolated_store) -> None:
     ):
         _, _, sources = service._retrieve_and_build_messages("q", db, None)
 
-    assert sources == [{"filename": "vec.pdf", "score": 0.9}]
+    assert sources == [{"filename": "vec.pdf", "score": 0.9, "url": "/files/vec.pdf"}]
 
 
 def test_no_context_produces_fallback_prompt(isolated_store) -> None:
@@ -176,6 +186,7 @@ def test_superseded_source_is_annotated_not_filtered(isolated_store) -> None:
             "text": "Older EOP guidance.",
             "score": 0.9,
             "filename": "CPG_101_V2.pdf",
+            "filepath": "/app/project_data/CPG_101_V2.pdf",
             "superseders": ["CPG-101: Developing & Maintaining EOPs"],
         },
     ]
@@ -191,6 +202,7 @@ def test_superseded_source_is_annotated_not_filtered(isolated_store) -> None:
         {
             "filename": "CPG_101_V2.pdf",
             "score": 0.9,
+            "url": "/files/CPG_101_V2.pdf",
             "superseded_by": "CPG-101: Developing & Maintaining EOPs",
         }
     ]
@@ -209,6 +221,7 @@ def test_non_superseded_source_omits_supersede_field(isolated_store) -> None:
             "text": "Current guidance.",
             "score": 0.9,
             "filename": "NIMS.pdf",
+            "filepath": "/app/project_data/NIMS.pdf",
             "superseders": [],
         },
     ]
@@ -219,7 +232,7 @@ def test_non_superseded_source_omits_supersede_field(isolated_store) -> None:
     ):
         _, messages, sources = service._retrieve_and_build_messages("q", db, None)
 
-    assert sources == [{"filename": "NIMS.pdf", "score": 0.9}]
+    assert sources == [{"filename": "NIMS.pdf", "score": 0.9, "url": "/files/NIMS.pdf"}]
     assert "SUPERSEDED" not in messages[-1]["content"]
 
 
@@ -232,6 +245,7 @@ def test_multiple_superseders_deduped_and_joined(isolated_store) -> None:
             "text": "old",
             "score": 0.9,
             "filename": "old.pdf",
+            "filepath": "/app/project_data/old.pdf",
             "superseders": ["Edition B", "Edition B", "Edition C"],
         },
     ]

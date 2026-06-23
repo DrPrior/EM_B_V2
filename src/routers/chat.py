@@ -49,6 +49,13 @@ class ChatRequest(BaseModel):
 class Source(BaseModel):
     filename: str = Field(..., description="Source document filename.")
     score: float = Field(..., description="Cosine similarity score (0-1).")
+    url: str | None = Field(
+        default=None,
+        description=(
+            "Relative URL (/files/...) to open the original document, or null "
+            "for catalog-only entries with no file on disk."
+        ),
+    )
     superseded_by: str | None = Field(
         default=None,
         description=(
@@ -73,7 +80,13 @@ class ChatResponse(BaseModel):
             "example": {
                 "answer": "Emergency management is...",
                 "session_id": "550e8400-e29b-41d4-a716-446655440000",
-                "sources": [{"filename": "FEMA_Guide.pdf", "score": 0.91}],
+                "sources": [
+                    {
+                        "filename": "FEMA_Guide.pdf",
+                        "score": 0.91,
+                        "url": "/files/01-frameworks/FEMA_Guide.pdf",
+                    }
+                ],
             }
         }
     )
@@ -114,6 +127,7 @@ def chat_with_graph(
                 Source(
                     filename=s["filename"],
                     score=s["score"],
+                    url=s.get("url"),
                     superseded_by=s.get("superseded_by"),
                 )
                 for s in sources

@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from src.core.rate_limit import limiter
 from src.database.connection import Neo4jConnection
 from src.database.schema import setup_constraints
-from src.routers import admin, chat, graph
+from src.routers import admin, chat, files, graph
 
 
 @asynccontextmanager
@@ -78,6 +78,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(graph.router)
 app.include_router(chat.router)
 app.include_router(admin.router)
+app.include_router(files.router)
 
 
 @app.get("/health")

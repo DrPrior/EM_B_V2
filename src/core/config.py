@@ -68,6 +68,14 @@ class Settings(BaseSettings):
             "API returns HTTP 429 (protects the API and LLM budget)"
         ),
     )
+    data_root: str = Field(
+        default="/app/project_data",
+        description=(
+            "Root directory the ingested source files live under. Used both as "
+            "the ingestion root and to resolve cited-source download links served "
+            "by the /files endpoint."
+        ),
+    )
 
 
 settings = Settings()

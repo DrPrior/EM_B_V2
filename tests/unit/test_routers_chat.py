@@ -33,9 +33,9 @@ def test_chat_success(client: TestClient) -> None:
     body = resp.json()
     assert body["answer"] == "an answer"
     assert body["session_id"] == "sid-1"
-    # The Source model always serialises superseded_by (null when not superseded).
+    # The Source model always serialises url and superseded_by (null when absent).
     assert body["sources"] == [
-        {"filename": "a.pdf", "score": 0.9, "superseded_by": None}
+        {"filename": "a.pdf", "score": 0.9, "url": None, "superseded_by": None}
     ]
 
 

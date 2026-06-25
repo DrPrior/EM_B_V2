@@ -9,17 +9,18 @@ import re
 import sys
 import uuid
 from pathlib import Path  # type: ignore[import-untyped]
-from typing import Optional
 
+# Third-party imports
 from neo4j import Session  # type: ignore[import-untyped]
 
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
+# Local imports
 from src.core.config import settings
 from src.database.connection import Neo4jConnection
 from src.services.embeddings import embed_and_store_chunk
+
+# Add project root to Python path so local package imports work
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 
 # ==========================================
@@ -30,7 +31,9 @@ from src.services.embeddings import embed_and_store_chunk
 def discover_files(root_path: str) -> list[str]:
     """Discover all readable files in the directory tree.
 
-    Supports plaintext (.txt, .md), PDF, Word (.docx), and PowerPoint (.pptx) files.
+    Supports plaintext (.txt, .md), PDF, Word (.docx), and PowerPoint (.pptx)
+    files. MANIFEST*.md files are corpus metadata (loaded by
+    ``pipeline.load_manifest``), not content, so they are excluded.
 
     Args:
         root_path: Root directory to traverse.
@@ -48,12 +51,15 @@ def discover_files(root_path: str) -> list[str]:
 
     for file_path in root.rglob("*"):
         if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+            name_upper = file_path.name.upper()
+            if name_upper.startswith("MANIFEST") and name_upper.endswith(".MD"):
+                continue  # corpus metadata, handled by pipeline.load_manifest
             files.append(str(file_path))
 
     return sorted(files)
 
 
-def read_file_content(file_path: str) -> Optional[str]:
+def read_file_content(file_path: str) -> str | None:
     """Read text content from a file.
 
     Supports plaintext, markdown, and PDF files.
@@ -69,7 +75,7 @@ def read_file_content(file_path: str) -> Optional[str]:
         suffix = path.suffix.lower()
 
         if suffix in {".txt", ".md"}:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return f.read()
 
         elif suffix == ".pdf":
@@ -140,9 +146,7 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def chunk_text(
-    text: str, max_chunk_size: int = 512, overlap: int = 64
-) -> list[str]:
+def chunk_text(text: str, max_chunk_size: int = 512, overlap: int = 64) -> list[str]:
     """Split text into overlapping chunks with semantic boundaries.
 
     Splits on sentence endings, newlines before headings/bullets, and blank
@@ -204,21 +208,25 @@ def chunk_text(
 
 
 def is_file_embedded(session: Session, file_path: str) -> bool:
-    """Return True if the file already has at least one embedded Chunk in Neo4j.
+    """Return True if every Chunk of the file already has a stored embedding.
+
+    A file counts as embedded only when it has at least one chunk AND none of
+    its chunks are missing an embedding. Partially-embedded files (e.g. a run
+    interrupted by an Ollama outage) return False so they get reprocessed.
 
     Args:
         session: Neo4j session.
         file_path: Absolute path of the file to check.
 
     Returns:
-        True if the Document exists and has at least one Chunk with a stored embedding.
+        True if the File exists and all of its chunks have a stored embedding.
     """
     result = session.execute_read(
         lambda tx: tx.run(
             """
-            MATCH (doc:Document {filepath: $filepath})-[:HAS_CHUNK]->(c:Chunk)
-            WHERE c.embedding IS NOT NULL
-            RETURN count(c) > 0 AS embedded
+            MATCH (doc:File {filepath: $filepath})-[:HAS_CHUNK]->(c:Chunk)
+            WITH count(c) AS total, count(c.embedding) AS embedded
+            RETURN total > 0 AND total = embedded AS embedded
             """,
             filepath=file_path,
         ).single()
@@ -238,9 +246,7 @@ def create_directory_node(session: Session, path: str, name: str) -> None:
     MERGE (d:Directory {path: $path})
     ON CREATE SET d.name = $name
     """
-    session.execute_write(
-        lambda tx: tx.run(query, path=path, name=name)
-    )
+    session.execute_write(lambda tx: tx.run(query, path=path, name=name))
 
 
 def _link_directories(session: Session, parent_path: str, child_path: str) -> None:
@@ -261,9 +267,7 @@ def _link_directories(session: Session, parent_path: str, child_path: str) -> No
     )
 
 
-def create_directory_hierarchy(
-    session: Session, file_path: str, data_root: str
-) -> str:
+def create_directory_hierarchy(session: Session, file_path: str, data_root: str) -> str:
     """Create Directory nodes for every ancestor from data_root to the file's
     parent, linking each level with a CONTAINS_DIR relationship.
 
@@ -294,10 +298,10 @@ def create_directory_hierarchy(
     return str(Path(file_path).parent)
 
 
-def create_document_node(
+def create_file_node(
     session: Session, dir_path: str, filepath: str, filename: str, extension: str
 ) -> None:
-    """Create or merge a Document node and link to parent Directory.
+    """Create or merge a File node and link to parent Directory.
 
     Args:
         session: Neo4j session.
@@ -308,7 +312,7 @@ def create_document_node(
     """
     query = """
     MATCH (d:Directory {path: $dir_path})
-    MERGE (doc:Document {filepath: $filepath})
+    MERGE (doc:File {filepath: $filepath})
     ON CREATE SET doc.filename = $filename, doc.extension = $extension
     MERGE (d)-[:CONTAINS_FILE]->(doc)
     """
@@ -323,10 +327,28 @@ def create_document_node(
     )
 
 
+def clear_file_chunks(session: Session, filepath: str) -> None:
+    """Delete any existing Chunk nodes for a file before re-chunking.
+
+    Ingest generates fresh chunk_ids on every run, so reprocessing a file
+    without clearing first would create duplicate chunks. Fully-embedded files
+    are skipped upstream, so this only runs for new or partially-embedded files.
+
+    Args:
+        session: Neo4j session.
+        filepath: Parent document filepath.
+    """
+    query = """
+    MATCH (doc:File {filepath: $filepath})-[:HAS_CHUNK]->(c:Chunk)
+    DETACH DELETE c
+    """
+    session.execute_write(lambda tx: tx.run(query, filepath=filepath))
+
+
 def create_chunk_node(
     session: Session, filepath: str, chunk_id: str, text: str, sequence: int
 ) -> None:
-    """Create a Chunk node and link to parent Document.
+    """Create a Chunk node and link to parent File.
 
     Args:
         session: Neo4j session.
@@ -336,7 +358,7 @@ def create_chunk_node(
         sequence: Sequence number (0-indexed).
     """
     query = """
-    MATCH (doc:Document {filepath: $filepath})
+    MATCH (doc:File {filepath: $filepath})
     MERGE (c:Chunk {chunk_id: $chunk_id})
     ON CREATE SET c.text = $text, c.sequence = $sequence
     MERGE (doc)-[:HAS_CHUNK]->(c)
@@ -357,7 +379,9 @@ def create_chunk_node(
 # ==========================================
 
 
-def _print_progress(index: int, total: int, file_path: str, chunks: int, embeddings: int) -> None:
+def _print_progress(
+    index: int, total: int, file_path: str, chunks: int, embeddings: int
+) -> None:
     """Print a single-file progress line to the terminal.
 
     Args:
@@ -448,20 +472,24 @@ def ingest_project_data(
             stats["errors"] += 1
             continue
 
-        # Create document node
+        # Create file node
         try:
-            create_document_node(
-                session, dir_path_str, file_path, filename, extension
-            )
+            create_file_node(session, dir_path_str, file_path, filename, extension)
         except Exception as e:
-            print(f"  ⚠️  [{index}/{total}] Document node failed: {e}")
+            print(f"  ⚠️  [{index}/{total}] File node failed: {e}")
             stats["errors"] += 1
             continue
 
         stats["files_processed"] += 1
 
+        # Drop any chunks left by a previous incomplete run so reprocessing
+        # doesn't create duplicates (fully-embedded files are skipped above).
+        clear_file_chunks(session, file_path)
+
         # Chunk the content and generate embeddings
-        chunks = chunk_text(content, settings.chunk_max_tokens, settings.chunk_overlap_tokens)
+        chunks = chunk_text(
+            content, settings.chunk_max_tokens, settings.chunk_overlap_tokens
+        )
         file_chunks = 0
         file_embeddings = 0
 

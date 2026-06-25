@@ -12,14 +12,14 @@ Run directly:
 import sys
 from pathlib import Path
 
+from neo4j import ManagedTransaction, Session  # type: ignore[import-untyped]
+
+from pipeline.extract import extract_entities, extract_material_type
+from src.database import schema
+from src.database.connection import Neo4jConnection
+
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from neo4j import ManagedTransaction, Session # type: ignore[import-untyped]
-
-from src.database.connection import Neo4jConnection
-from src.database import schema
-from pipeline.extract import extract_entities, extract_material_type
 
 
 # ==========================================
@@ -30,7 +30,7 @@ from pipeline.extract import extract_entities, extract_material_type
 def _enrich_chunk_tx(
     tx: ManagedTransaction, chunk_id: str, filepath: str, entities: dict
 ) -> None:
-    """Merge all entity nodes for a chunk and create relationships in one transaction."""
+    """Merge a chunk's entity nodes and relationships in one transaction."""
     for name in entities["concepts"]:
         tx.run(schema.MERGE_CONCEPT, name=name, description="")
         tx.run(schema.LINK_CHUNK_CONCEPT, chunk_id=chunk_id, name=name)
@@ -65,8 +65,8 @@ def _assign_material_type_tx(
 def _print_progress(index: int, total: int, label: str, entity_counts: dict) -> None:
     pct = int(index / total * 100)
     bar_filled = pct // 5
-    bar = "#" * bar_filled + "-" * (20 - bar_filled)
-    print(f"  [{bar}] {pct:3d}%  ({index:>{len(str(total))}}/{total})  {label}")
+    barred = "#" * bar_filled + "-" * (20 - bar_filled)
+    print(f"  [{barred}] {pct:3d}%  ({index:>{len(str(total))}}/{total})  {label}")
     c = entity_counts
     print(
         f"         concepts: {c['concepts']}  orgs: {c['organizations']}  "
@@ -126,7 +126,10 @@ def enrich_material_types(session: Session, stats: dict) -> None:
             stats["docs_typed"] += 1
             pct = int(index / total * 100)
             bar = "#" * (pct // 5) + "-" * (20 - pct // 5)
-            print(f"  [{bar}] {pct:3d}%  ({index}/{total})  {filename}  →  {material_type}")
+            print(
+                f"  [{bar}] {pct:3d}%  ({index}/{total})  "
+                f"{filename}  →  {material_type}"
+            )
         except Exception as e:
             print(f"  ⚠  [{index}/{total}] Failed for {filename}: {e}")
             stats["errors"] += 1
@@ -136,9 +139,7 @@ def enrich_chunks(session: Session, stats: dict) -> None:
     """Extract and link entities for every unenriched Chunk node."""
     _print_section("PASS 2 — Chunk Entity Extraction")
 
-    rows = session.execute_read(
-        lambda tx: list(tx.run(schema.FETCH_UNENRICHED_CHUNKS))
-    )
+    rows = session.execute_read(lambda tx: list(tx.run(schema.FETCH_UNENRICHED_CHUNKS)))
     total = len(rows)
 
     if total == 0:
@@ -163,12 +164,17 @@ def enrich_chunks(session: Session, stats: dict) -> None:
             stats["legal_references"] += len(entities["legal_references"])
             stats["courses"] += len(entities["courses"])
 
-            _print_progress(index, total, filename, {
-                "concepts": len(entities["concepts"]),
-                "organizations": len(entities["organizations"]),
-                "legal_references": len(entities["legal_references"]),
-                "courses": len(entities["courses"]),
-            })
+            _print_progress(
+                index,
+                total,
+                filename,
+                {
+                    "concepts": len(entities["concepts"]),
+                    "organizations": len(entities["organizations"]),
+                    "legal_references": len(entities["legal_references"]),
+                    "courses": len(entities["courses"]),
+                },
+            )
 
         except Exception as e:
             print(f"  ⚠  [{index}/{total}] Chunk {chunk_id[:8]}... failed: {e}")

@@ -1,10 +1,13 @@
-FROM gemma4:e2b
+FROM gemma4:12b-it-qat
 
 # QA/RAG-specific parameters
 PARAMETER temperature 0
 PARAMETER top_p 0.9
 PARAMETER top_k 40
 PARAMETER num_gpu 999
+# Context window: must hold system prompt + RAG context + ~10 turns of history.
+# Ollama's default (2048) is too small and silently truncates conversation history.
+PARAMETER num_ctx 8192
 
 # System instructions for QA Bot behavior
 SYSTEM """Answer questions about the emergency management-related data in the database only. If you cannot answer a question with the avalible data, say so.  For multi-part questions, address each part clearly. Be helpful, accurate, and avoid speculation."""

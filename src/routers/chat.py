@@ -1,12 +1,18 @@
 import json
-from collections.abc import Iterator
-from typing import Generator
+from collections.abc import Generator, Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, status # type: ignore[import-untyped]
+from fastapi import (  # type: ignore[import-untyped]
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    status,
+)
 from fastapi.responses import StreamingResponse  # type: ignore[import-untyped]
+from neo4j import READ_ACCESS, Session  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from neo4j import Session # type: ignore[import-untyped]
 
+from src.core.rate_limit import chat_rate_limit, limiter
 from src.database.connection import Neo4jConnection
 from src.services.rag import RAGService
 from src.services.session import Message, conversation_store
@@ -43,19 +49,44 @@ class ChatRequest(BaseModel):
 class Source(BaseModel):
     filename: str = Field(..., description="Source document filename.")
     score: float = Field(..., description="Cosine similarity score (0-1).")
+    url: str | None = Field(
+        default=None,
+        description=(
+            "Relative URL (/files/...) to open the original document, or null "
+            "for catalog-only entries with no file on disk."
+        ),
+    )
+    superseded_by: str | None = Field(
+        default=None,
+        description=(
+            "Title of the current document that supersedes this source, if any. "
+            "Superseded sources are still returned (historical reference)."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):
     answer: str = Field(..., description="The LLM-generated answer.")
-    session_id: str = Field(..., description="Session UUID — pass this in follow-up questions.")
-    sources: list[Source] = Field(default_factory=list, description="Documents used to generate the answer.")
+    session_id: str = Field(
+        ..., description="Session UUID — pass this in follow-up questions."
+    )
+    sources: list[Source] = Field(
+        default_factory=list,
+        description="Documents used to generate the answer.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "answer": "Emergency management is...",
                 "session_id": "550e8400-e29b-41d4-a716-446655440000",
-                "sources": [{"filename": "FEMA_Guide.pdf", "score": 0.91}],
+                "sources": [
+                    {
+                        "filename": "FEMA_Guide.pdf",
+                        "score": 0.91,
+                        "url": "/files/01-frameworks/FEMA_Guide.pdf",
+                    }
+                ],
             }
         }
     )
@@ -67,24 +98,40 @@ class HistoryResponse(BaseModel):
 
 
 def get_db_session() -> Generator[Session, None, None]:
+    # Chat retrieval is read-only — a READ session makes the server reject any
+    # accidental write (the closest equivalent to a read-only DB user, which
+    # Neo4j Community Edition cannot provide).
     connection = Neo4jConnection.get_instance()
-    yield from connection.get_session_dependency()
+    yield from connection.get_session_dependency(access_mode=READ_ACCESS)
 
 
 @router.post("/", response_model=ChatResponse)
+@limiter.limit(chat_rate_limit)
 def chat_with_graph(
-    request: ChatRequest,
+    request: Request,
+    payload: ChatRequest,
     session: Session = Depends(get_db_session),
 ) -> ChatResponse:
-    """Answer a question using RAG. Pass the returned session_id to maintain conversation context."""
+    """Answer a question using RAG.
+
+    Pass the returned session_id to maintain conversation context.
+    """
     try:
         session_id, answer, sources = rag_service.answer_question(
-            request.question, session, request.session_id
+            payload.question, session, payload.session_id
         )
         return ChatResponse(
             answer=answer,
             session_id=session_id,
-            sources=[Source(filename=s["filename"], score=s["score"]) for s in sources],
+            sources=[
+                Source(
+                    filename=s["filename"],
+                    score=s["score"],
+                    url=s.get("url"),
+                    superseded_by=s.get("superseded_by"),
+                )
+                for s in sources
+            ],
         )
     except HTTPException:
         raise
@@ -92,12 +139,14 @@ def chat_with_graph(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat request: {str(e)}",
-        )
+        ) from e
 
 
 @router.post("/stream")
+@limiter.limit(chat_rate_limit)
 def chat_stream(
-    request: ChatRequest,
+    request: Request,
+    payload: ChatRequest,
     session: Session = Depends(get_db_session),
 ) -> StreamingResponse:
     """Answer a question with a streaming SSE response.
@@ -110,7 +159,7 @@ def chat_stream(
     """
     try:
         sid, sources, token_iter = rag_service.stream_answer(
-            request.question, session, request.session_id
+            payload.question, session, payload.session_id
         )
     except HTTPException:
         raise
@@ -118,10 +167,11 @@ def chat_stream(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to prepare stream: {str(e)}",
-        )
+        ) from e
 
     def event_stream() -> Iterator[str]:
-        yield f"data: {json.dumps({'type': 'metadata', 'session_id': sid, 'sources': sources})}\n\n"
+        metadata = {"type": "metadata", "session_id": sid, "sources": sources}
+        yield f"data: {json.dumps(metadata)}\n\n"
         try:
             for token in token_iter:
                 yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"

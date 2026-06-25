@@ -4,10 +4,10 @@ This module provides REST API endpoints for querying and searching
 the Neo4j knowledge graph.
 """
 
-from typing import Generator
+from collections.abc import Generator
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from neo4j import ManagedTransaction, Record, Session
+from neo4j import READ_ACCESS, ManagedTransaction, Record, Session
 from pydantic import BaseModel, Field
 
 from src.database.connection import Neo4jConnection
@@ -23,12 +23,14 @@ def get_session() -> Generator[Session, None, None]:
     Yields a Neo4j session for each request and ensures cleanup after completion.
 
     Yields:
-        A Neo4j session for database operations.
+        A read-only Neo4j session for database operations.
 
     Raises:
         RuntimeError: If the Neo4j driver has been closed or is unavailable.
     """
-    yield from Neo4jConnection.get_instance().get_session_dependency()
+    yield from Neo4jConnection.get_instance().get_session_dependency(
+        access_mode=READ_ACCESS
+    )
 
 
 @router.get("/nodes", response_model=list[NodeResponse])
@@ -59,9 +61,7 @@ def get_nodes(session: Session = Depends(get_session)) -> list[NodeResponse]:
         ]
     """
     try:
-        result = session.execute_read(
-            _query_nodes
-        )
+        result = session.execute_read(_query_nodes)
         nodes = [
             NodeResponse(
                 element_id=str(record["id"]),
@@ -75,7 +75,7 @@ def get_nodes(session: Session = Depends(get_session)) -> list[NodeResponse]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve nodes: {str(e)}",
-        )
+        ) from e
 
 
 def _query_nodes(tx: ManagedTransaction) -> list[Record]:
@@ -88,13 +88,17 @@ def _query_nodes(tx: ManagedTransaction) -> list[Record]:
         List of records with node data.
     """
     result = tx.run(
-        "MATCH (n) RETURN elementId(n) as id, labels(n) as labels, properties(n) as props LIMIT 10"
+        "MATCH (n) "
+        "RETURN elementId(n) as id, labels(n) as labels, properties(n) as props "
+        "LIMIT 10"
     )
     return list(result)
 
 
 @router.get("/nodes/{node_id}", response_model=NodeResponse)
-def get_node_by_id(node_id: str, session: Session = Depends(get_session)) -> NodeResponse:
+def get_node_by_id(
+    node_id: str, session: Session = Depends(get_session)
+) -> NodeResponse:
     """Get a specific node by its element ID.
 
     Retrieves a single node from the graph by its unique Neo4j element ID.
@@ -107,7 +111,8 @@ def get_node_by_id(node_id: str, session: Session = Depends(get_session)) -> Nod
         NodeResponse object with the node's data.
 
     Raises:
-        HTTPException: 404 if node not found, 500 if query fails, 503 if database unavailable.
+        HTTPException: 404 if node not found, 500 if query fails, 503 if
+            database unavailable.
 
     Example:
         GET /graph/nodes/4:abc123
@@ -118,9 +123,7 @@ def get_node_by_id(node_id: str, session: Session = Depends(get_session)) -> Nod
         }
     """
     try:
-        result = session.execute_read(
-            _query_node_by_id, node_id=node_id
-        )
+        result = session.execute_read(_query_node_by_id, node_id=node_id)
         record = result
         if not record:
             raise HTTPException(
@@ -138,7 +141,7 @@ def get_node_by_id(node_id: str, session: Session = Depends(get_session)) -> Nod
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve node: {str(e)}",
-        )
+        ) from e
 
 
 def _query_node_by_id(tx: ManagedTransaction, node_id: str) -> Record | None:
@@ -152,8 +155,10 @@ def _query_node_by_id(tx: ManagedTransaction, node_id: str) -> Record | None:
         Single record with node data, or None if not found.
     """
     result = tx.run(
-        "MATCH (n) WHERE elementId(n) = $id RETURN elementId(n) as id, labels(n) as labels, properties(n) as props LIMIT 1",
-        id=node_id
+        "MATCH (n) WHERE elementId(n) = $id "
+        "RETURN elementId(n) as id, labels(n) as labels, properties(n) as props "
+        "LIMIT 1",
+        id=node_id,
     )
     records = list(result)
     return records[0] if records else None
@@ -174,7 +179,8 @@ def search_nodes(q: str, session: Session = Depends(get_session)) -> SearchRespo
         SearchResponse object containing matching nodes and result count.
 
     Raises:
-        HTTPException: 400 if search term is empty, 500 if query fails, 503 if database unavailable.
+        HTTPException: 400 if search term is empty, 500 if query fails, 503 if
+            database unavailable.
 
     Example:
         GET /graph/search?q=Alice
@@ -197,9 +203,7 @@ def search_nodes(q: str, session: Session = Depends(get_session)) -> SearchRespo
         )
 
     try:
-        results = session.execute_read(
-            _query_search, search_term=q.strip()
-        )
+        results = session.execute_read(_query_search, search_term=q.strip())
         nodes = [
             NodeResponse(
                 element_id=str(record["id"]),
@@ -217,7 +221,7 @@ def search_nodes(q: str, session: Session = Depends(get_session)) -> SearchRespo
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
-        )
+        ) from e
 
 
 def _query_search(tx: ManagedTransaction, search_term: str) -> list[Record]:
@@ -230,9 +234,15 @@ def _query_search(tx: ManagedTransaction, search_term: str) -> list[Record]:
     Returns:
         List of records with matching nodes.
     """
+    # toStringOrNull (not toString) so array-valued properties such as a Chunk's
+    # `embedding` DoubleArray yield null instead of raising a TypeError; null
+    # CONTAINS ... is falsey, so those properties are simply skipped.
     result = tx.run(
-        "MATCH (n) WHERE ANY(prop IN properties(n) | toString(prop) CONTAINS $search) RETURN elementId(n) as id, labels(n) as labels, properties(n) as props LIMIT 20",
-        search=search_term
+        "MATCH (n) "
+        "WHERE ANY(key IN keys(n) WHERE toStringOrNull(n[key]) CONTAINS $search) "
+        "RETURN elementId(n) as id, labels(n) as labels, properties(n) as props "
+        "LIMIT 20",
+        search=search_term,
     )
     return list(result)
 
@@ -241,7 +251,9 @@ class VectorSearchRequest(BaseModel):
     """Request model for vector similarity search."""
 
     query: str = Field(..., description="The search query text to embed and search.")
-    top_k: int = Field(default=5, ge=1, le=50, description="Number of top results to return.")
+    top_k: int = Field(
+        default=5, ge=1, le=50, description="Number of top results to return."
+    )
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -269,7 +281,7 @@ def vector_search(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate embedding: {str(e)}",
-        )
+        ) from e
 
     try:
         results = session.execute_read(
@@ -292,7 +304,7 @@ def vector_search(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Vector search failed: {str(e)}",
-        )
+        ) from e
 
 
 def _query_vector_search(
@@ -311,7 +323,8 @@ def _query_vector_search(
     query = """
     CALL db.index.vector.queryNodes('chunk_vector_idx', $top_k, $embedding)
     YIELD node, score
-    RETURN elementId(node) as id, labels(node) as labels, properties(node) as props, score
+    RETURN elementId(node) as id, labels(node) as labels,
+           properties(node) as props, score
     """
     result = tx.run(query, embedding=embedding, top_k=top_k)
     return list(result)

@@ -8,12 +8,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI  # type: ignore[import-untyped]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-untyped]
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from src.core.rate_limit import limiter
 from src.database.connection import Neo4jConnection
 from src.database.schema import setup_constraints
-from src.routers import chat, graph
-from src.routers import admin
-
+from src.routers import admin, chat, files, graph
 
 
 @asynccontextmanager
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI):
         connection = Neo4jConnection.get_instance()
         connection.verify_connectivity()
         print("✓ Neo4j connection initialized successfully")
-        
+
         setup_constraints(connection.get_driver())
         print("✓ Database schema constraints and indexes initialized")
     except ValueError as e:
@@ -68,10 +69,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Per-IP rate limiting: register the shared limiter and the 429 handler so the
+# @limiter.limit decorators on the chat endpoints take effect.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Include routers
 app.include_router(graph.router)
 app.include_router(chat.router)
 app.include_router(admin.router)
+app.include_router(files.router)
 
 
 @app.get("/health")

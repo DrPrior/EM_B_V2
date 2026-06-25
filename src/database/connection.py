@@ -7,10 +7,14 @@ and validates Cypher queries to prevent injection vulnerabilities.
 
 import os
 import threading
-from typing import Generator
+from collections.abc import Generator
 
-from neo4j import Driver, GraphDatabase, Session # type: ignore[import-untyped]
-from neo4j.exceptions import ServiceUnavailable # type: ignore[import-untyped]
+from neo4j import (  # type: ignore[import-untyped]
+    WRITE_ACCESS,
+    Driver,
+    GraphDatabase,
+    Session,
+)
 
 
 class Neo4jConnection:
@@ -53,8 +57,7 @@ class Neo4jConnection:
             )
         if not uri:
             raise ValueError(
-                "DB_URI environment variable is not set. "
-                "Format: 'bolt://hostname:7687'"
+                "DB_URI environment variable is not set. Format: 'bolt://hostname:7687'"
             )
 
         # Parse auth string: "username/password"
@@ -67,7 +70,9 @@ class Neo4jConnection:
             ) from e
 
         self._uri: str = uri
-        self._driver: Driver | None = GraphDatabase.driver(uri, auth=(username, password))
+        self._driver: Driver | None = GraphDatabase.driver(
+            uri, auth=(username, password)
+        )
 
     @classmethod
     def get_instance(cls) -> "Neo4jConnection":
@@ -103,11 +108,16 @@ class Neo4jConnection:
             )
         self._driver.verify_connectivity()
 
-    def session(self) -> Session:
+    def session(self, access_mode: str = WRITE_ACCESS) -> Session:
         """Create and return a new Neo4j session.
 
         Use this method as a context manager for non-FastAPI database operations:
         `with connection.session() as session:`
+
+        Args:
+            access_mode: Transaction access mode for the session. Defaults to
+                WRITE_ACCESS. Pass READ_ACCESS for read-only sessions; the server
+                rejects any write attempted within a READ transaction.
 
         Returns:
             A Neo4j session object for database operations.
@@ -117,10 +127,9 @@ class Neo4jConnection:
         """
         if self._driver is None:
             raise RuntimeError(
-                "Driver is not initialized or has been closed. "
-                "Cannot create a session."
+                "Driver is not initialized or has been closed. Cannot create a session."
             )
-        return self._driver.session()
+        return self._driver.session(default_access_mode=access_mode)
 
     def get_driver(self) -> Driver:
         """Get the Neo4j driver instance.
@@ -133,8 +142,7 @@ class Neo4jConnection:
         """
         if self._driver is None:
             raise RuntimeError(
-                "Driver is not initialized or has been closed. "
-                "Cannot retrieve driver."
+                "Driver is not initialized or has been closed. Cannot retrieve driver."
             )
         return self._driver
 
@@ -153,7 +161,9 @@ class Neo4jConnection:
         else:
             raise RuntimeError("Driver is already closed or was never initialized.")
 
-    def get_session_dependency(self) -> Generator[Session, None, None]:
+    def get_session_dependency(
+        self, access_mode: str = WRITE_ACCESS
+    ) -> Generator[Session, None, None]:
         """FastAPI dependency generator for Neo4j session injection.
 
         This method yields a Neo4j session for use in FastAPI route handlers.
@@ -162,9 +172,18 @@ class Neo4jConnection:
 
         Usage:
             @app.get("/nodes")
-            def get_nodes(session: Session = Depends(Neo4jConnection.get_instance().get_session_dependency)):
+            def get_nodes(
+                session: Session = Depends(
+                    Neo4jConnection.get_instance().get_session_dependency
+                )
+            ):
                 # Use session for database operations
                 pass
+
+        Args:
+            access_mode: Transaction access mode for the session. Defaults to
+                WRITE_ACCESS. Read-only routes (chat, graph) should pass
+                READ_ACCESS so the server rejects any accidental write.
 
         Yields:
             A Neo4j session for database operations.
@@ -175,10 +194,9 @@ class Neo4jConnection:
         """
         if self._driver is None:
             raise RuntimeError(
-                "Driver is not initialized or has been closed. "
-                "Cannot create a session."
+                "Driver is not initialized or has been closed. Cannot create a session."
             )
-        session = self._driver.session()
+        session = self._driver.session(default_access_mode=access_mode)
         try:
             yield session
         finally:

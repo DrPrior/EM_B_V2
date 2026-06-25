@@ -2,6 +2,7 @@
 .env.local
 project_data
 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -25,7 +26,7 @@ env/
 *~
 .DS_Store
 .vscode/settings.json
-EM_B_V1.code-workspace
+EM_B_Hybrid.code-workspace
 
 # Testing
 .pytest_cache/

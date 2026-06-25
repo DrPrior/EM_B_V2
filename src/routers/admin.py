@@ -13,6 +13,11 @@ from pydantic import BaseModel, Field
 from pipeline.ingest import ingest_project_data
 from pipeline.load_manifest import load_manifests
 from src.database.connection import Neo4jConnection
+from src.services.ollama_bootstrap import (
+    OllamaUnavailableError,
+    ensure_models,
+    wait_for_ollama,
+)
 
 # Trigger ingestion from the host:
 #   curl.exe -s -X POST http://localhost:8000/admin/ingest | python -m json.tool
@@ -47,6 +52,10 @@ class ManifestLoadResponse(BaseModel):
     matched: int
     created: int
     errors: int
+
+
+class BootstrapResponse(BaseModel):
+    status: str
 
 
 def get_db_session() -> Generator[Session, None, None]:
@@ -98,3 +107,31 @@ def trigger_manifest_load(
             detail=f"Manifest load failed: {str(e)}",
         ) from e
     return ManifestLoadResponse(**stats)
+
+
+@router.post(
+    "/bootstrap-models",
+    response_model=BootstrapResponse,
+    status_code=status.HTTP_200_OK,
+)
+def trigger_model_bootstrap() -> BootstrapResponse:
+    """Re-provision the host-native Ollama models without restarting the API.
+
+    Waits for the host Ollama daemon, then pulls base models and builds the
+    custom chat-model/embedding-model variants if any are missing. Idempotent —
+    safe to call repeatedly; already-present models are skipped.
+    """
+    try:
+        wait_for_ollama()
+        ensure_models()
+    except OllamaUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Model bootstrap failed: {str(e)}",
+        ) from e
+    return BootstrapResponse(status="ok")

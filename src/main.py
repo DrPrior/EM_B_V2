@@ -15,6 +15,7 @@ from src.core.rate_limit import limiter
 from src.database.connection import Neo4jConnection
 from src.database.schema import setup_constraints
 from src.routers import admin, chat, files, graph
+from src.services.ollama_bootstrap import OllamaUnavailableError, bootstrap
 
 
 @asynccontextmanager
@@ -22,7 +23,7 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan event handler for startup and shutdown.
 
     This context manager handles:
-    - Startup: Initialize Neo4j connection, validate it, and ingest data
+    - Startup: Initialize Neo4j connection, provision host-native Ollama models
     - Shutdown: Close Neo4j driver and cleanup resources
 
     Args:
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI):
 
     Raises:
         ValueError: If required environment variables are missing.
+        OllamaUnavailableError: If the host Ollama daemon cannot be reached or
+            the required models cannot be provisioned (fail-fast).
         Exception: If Neo4j connection or data ingestion fails during startup.
     """
     # Startup
@@ -48,6 +51,16 @@ async def lifespan(app: FastAPI):
         raise
     except Exception as e:
         print(f"✗ Unexpected error during Neo4j connection: {e}")
+        raise
+
+    # Provision the host-native (hybrid) Ollama daemon: wait for it to be
+    # reachable, then pull base models and build the custom variants if missing.
+    # Fail fast — a running API with no usable Ollama only yields broken chat.
+    try:
+        bootstrap()
+        print("✓ Host Ollama reachable and required models provisioned")
+    except OllamaUnavailableError as e:
+        print(f"✗ {e}")
         raise
 
     yield

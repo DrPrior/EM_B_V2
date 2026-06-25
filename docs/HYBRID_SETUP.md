@@ -38,10 +38,22 @@ These let the container talk to Ollama and keep both models resident in memory.
 > firewall. On an untrusted network, restrict port `11434` with the host
 > firewall (allow only the Docker bridge / loopback).
 
-**Windows:**
+> ℹ️ **Persistence:** Ollama re-reads these variables **every time the daemon
+> starts**, so what matters is whether they're stored persistently in the OS. Set
+> them with the methods below (not with a per-shell `$env:` / `export`, which
+> only lasts for that session). The *models* themselves are never persistent —
+> after an Ollama restart or reboot, VRAM starts empty and models reload on the
+> first query, then stay resident because `OLLAMA_KEEP_ALIVE=-1` is still in
+> effect.
+
+**Windows (persists permanently):**
 1. Search the Start Menu for **"Edit the system environment variables"**.
-2. Add the three **System variables** above.
+2. Add the three **System variables** above (or use `setx OLLAMA_HOST 0.0.0.0`, etc.).
 3. Quit Ollama from the system tray and relaunch it.
+
+Set once — every future restart and reboot picks them up automatically. (Do
+**not** use `$env:OLLAMA_HOST="0.0.0.0"` in a PowerShell session; that is
+session-only and won't survive.)
 
 **macOS:**
 ```bash
@@ -50,6 +62,29 @@ launchctl setenv OLLAMA_KEEP_ALIVE "-1"
 launchctl setenv OLLAMA_MAX_LOADED_MODELS "2"
 ```
 Then fully quit and relaunch the Ollama app.
+
+> ⚠️ **macOS gotcha:** `launchctl setenv` survives an Ollama app restart but is
+> **lost on reboot / logout** — you'd have to re-run it. For true persistence,
+> add a **LaunchAgent** that sets them at login. Create
+> `~/Library/LaunchAgents/com.ollama.env.plist`:
+> ```xml
+> <?xml version="1.0" encoding="UTF-8"?>
+> <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+>   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+> <plist version="1.0">
+> <dict>
+>   <key>Label</key><string>com.ollama.env</string>
+>   <key>ProgramArguments</key>
+>   <array>
+>     <string>sh</string><string>-c</string>
+>     <string>launchctl setenv OLLAMA_HOST 0.0.0.0; launchctl setenv OLLAMA_KEEP_ALIVE -1; launchctl setenv OLLAMA_MAX_LOADED_MODELS 2</string>
+>   </array>
+>   <key>RunAtLoad</key><true/>
+> </dict>
+> </plist>
+> ```
+> Then `launchctl load ~/Library/LaunchAgents/com.ollama.env.plist` (it also runs
+> automatically at each login). Relaunch the Ollama app afterward.
 
 ### 3. Verify Ollama is reachable
 

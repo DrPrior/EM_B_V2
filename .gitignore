@@ -50,6 +50,13 @@ build/
 dist/
 *.so
 
+# Electron desktop app build outputs (source under electron/ IS committed;
+# src/static/vendor/ IS committed so it ships in the image)
+electron/node_modules/
+electron/dist/
+# Release assets produced by electron/scripts/build-release.ps1
+release/
+
 
 #test outputs and logs
 test_output.txt

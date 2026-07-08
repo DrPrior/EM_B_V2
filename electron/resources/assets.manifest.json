@@ -1,0 +1,24 @@
+{
+  "_comment": "Points the first-run wizard at the heavy release assets it downloads and caches. Fill in url/sha256 after running electron/scripts/build-release.ps1 and uploading the outputs to your internal release host. image.version MUST match the tag the API image tar was built with (emb-hybrid-api:<version>) and the APP_VERSION the desktop compose interpolates.",
+  "image": {
+    "version": "0.1.0",
+    "url": "https://RELEASE_HOST/emb-hybrid/emb-hybrid-api-0.1.0.tar.gz",
+    "sha256": ""
+  },
+  "snapshot": {
+    "url": "https://RELEASE_HOST/emb-hybrid/neo4j.dump",
+    "sha256": ""
+  },
+  "projectData": {
+    "url": "https://RELEASE_HOST/emb-hybrid/project_data.tar.gz",
+    "sha256": ""
+  },
+  "ollama": {
+    "win32": "https://ollama.com/download/OllamaSetup.exe",
+    "darwin": "https://ollama.com/download/Ollama.dmg"
+  },
+  "docker": {
+    "win32": "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe",
+    "darwin": "https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+  }
+}

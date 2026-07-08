@@ -1,0 +1,62 @@
+# Production compose used by the Electron desktop app (NOT for development).
+#
+# Differences from docker-compose.yml:
+#   - The `api` service runs a PREBUILT, pinned image (emb-hybrid-api:<version>)
+#     loaded from a shipped tar via `docker load` — end users never build the
+#     image or run `uv pip install`, and there is no --reload / source bind mount.
+#   - Credentials and host paths come from a per-install env file that the
+#     Electron app generates under its userData dir (see electron/lib/envfile.js),
+#     passed with `docker compose --env-file <path> -f docker-compose.desktop.yml`.
+#   - The only bind mount kept is project_data (read-only) so citation download
+#     links (/files/...) resolve to the real source documents. The Modelfiles are
+#     baked into the image, so they are not mounted here.
+#
+# Ollama is intentionally absent — it runs natively on the host for GPU access
+# and is provisioned by the wizard. The api reaches it at host.docker.internal.
+
+services:
+  neo4j:
+    # MUST match the image the shipped snapshot was exported with — the Neo4j
+    # store format has to be identical on both ends or the dump won't load.
+    image: neo4j:2026.04.0
+    ports:
+      # Bound to loopback only — a desktop app has no reason to expose the DB
+      # off-box. The API reaches it in-network as bolt://neo4j:7687 regardless.
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH}
+      - NEO4J_db_transaction_timeout=5s
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    image: emb-hybrid-api:${APP_VERSION:-latest}
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH}
+      - DB_URI=bolt://neo4j:7687
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - CHAT_MODEL=chat-model
+      - EMBEDDING_MODEL=embedding-model
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      # Read-only: the desktop app ships a prebuilt graph, so nothing writes here.
+      # Serves the source PDFs/PPTX behind citation links via /files/...
+      - "${PROJECT_DATA_DIR}:/app/project_data:ro"
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+    name: em_b_v2_neo4j_data

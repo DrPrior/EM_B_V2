@@ -135,6 +135,56 @@ curl.exe -s -X POST http://localhost:8000/admin/bootstrap-models
 
 ---
 
+## Sharing the graph database
+
+The populated graph lives in a **named Docker volume** (`em_b_v2_neo4j_data`)
+that is **not** part of the repo. If you just share the code, a coworker gets an
+**empty** database and would have to re-run the entire
+`ingest → load_manifest → enrich` pipeline — which needs all the source
+documents *and* burns a lot of host LLM time. To skip that, ship them a
+**snapshot** of the graph alongside the code.
+
+Two things to keep in mind:
+
+- **The Neo4j version is pinned** (`image: neo4j:2026.04.0` in
+  [`docker-compose.yml`](../docker-compose.yml)) precisely so a snapshot exported
+  on one machine is guaranteed to load on another — the store format must match.
+  If you bump that version, re-export any shared snapshot.
+- **Sharing the graph does not remove the Ollama dependency.** The coworker still
+  needs host-native Ollama running to *query* (embedding the question, entity
+  extraction, chat). The snapshot only saves them the rebuild.
+
+### You — export
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\export-graph.ps1
+```
+
+This stops Neo4j (the offline dump format requires it), writes
+`snapshot/neo4j.dump`, and restarts Neo4j. The dump carries **all nodes,
+embeddings, and the `chunk_vector_idx` vector-index config** — nothing needs
+rebuilding on the other end.
+
+`snapshot/` is **gitignored** because a dump with embeddings is large (tens–
+hundreds of MB). Don't commit it directly — share it via **Git LFS** or send the
+`.dump` out-of-band (email/drive/USB).
+
+### Coworker — import
+
+After cloning the repo, drop the shared `neo4j.dump` into a `snapshot/` folder at
+the repo root, then — **before** the first `docker compose up`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\import-graph.ps1 -Up
+```
+
+This loads the dump into the local volume (**overwriting** any existing local
+graph) and brings the stack up. Omit `-Up` to load only and start the stack
+yourself later. Host-native Ollama must be installed and running (see the
+one-time setup above) for chat to work.
+
+---
+
 ## Hardening for untrusted networks (laptops)
 
 `OLLAMA_HOST=0.0.0.0` is required so the API **container** can reach Ollama, but

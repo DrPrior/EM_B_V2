@@ -1,6 +1,10 @@
 services:
   neo4j:
-    image: neo4j:latest
+    # Pinned (not :latest) so a graph snapshot exported with export-graph.ps1 is
+    # guaranteed to load on a coworker's machine — the store format must match on
+    # both ends. Bump deliberately, and re-export any shared snapshot after a bump.
+    # See docs/HYBRID_SETUP.md → "Sharing the graph database".
+    image: neo4j:2026.04.0
     ports:
       - "7474:7474"
       - "7687:7687"

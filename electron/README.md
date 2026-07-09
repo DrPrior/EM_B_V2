@@ -11,6 +11,13 @@ unchanged. Electron:
 2. On **later runs**, waits for Docker + Ollama and brings the stack up.
 3. Loads the existing web UI at `http://127.0.0.1:8000` in its window.
 
+**Delivery: USB drive, no download server.** The three heavy *custom* assets
+(API image tar, graph snapshot, corpus) ship in an `assets/` folder on the USB,
+read locally at setup time — the USB only needs to be plugged in during first
+run. The targets are **online**, so everything else (Docker Desktop installer,
+Ollama installer, and the ~10 GB base models) is fetched from official sources.
+Docker and Ollama are installed only if missing (detection per machine).
+
 Ollama stays **host-native** (not in Docker) so it uses the GPU. GPU
 acceleration is Ollama's job and auto-detected: CUDA (Nvidia), Vulkan (Intel
 Arc / iGPU — experimental), Metal (Apple Silicon), or CPU fallback.
@@ -25,6 +32,7 @@ electron/
   supervisor.js      compose up/down, /health polling, quickStart fast path
   lib/
     firstrun.js      guided first-run orchestrator (the step sequence)
+    assets.js        locate the USB `assets/` folder (auto-detect + verify)
     docker.js        detect/install Docker, load image, run compose
     ollama.js        detect/install Ollama, pull bases + build variants (streamed)
     modelfile.js     Node port of ollama_bootstrap._parse_modelfile
@@ -46,13 +54,19 @@ Related files at the repo root: `docker-compose.desktop.yml` (production compose
 prebuilt image + generated env), `Dockerfile.prod` (lean runtime image),
 `.env.example`.
 
-## One-time: build the release assets (maintainer)
+## Preparing a USB drive (maintainer)
+
+Two build steps, then copy onto the stick. **Order matters**: build the assets
+first (it updates the manifest), then build the installers (they bake the
+manifest in).
+
+### 1. Build the custom assets
 
 Do this on a machine that has a **fully built, enriched graph** (ran
 ingest → load_manifest → enrich) and the `project_data/` corpus on disk.
 
 ```powershell
-pwsh -File electron/scripts/build-release.ps1 -Version 0.1.0 -BaseUrl https://YOUR_HOST/emb-hybrid
+pwsh -File electron/scripts/build-release.ps1 -Version 0.1.0
 ```
 
 This produces in `release/`:
@@ -63,16 +77,14 @@ This produces in `release/`:
 | `neo4j.dump` | imported into the Neo4j volume on first run |
 | `project_data.tar.gz` | extracted + bind-mounted read-only (citation downloads) |
 
-It also updates `electron/resources/assets.manifest.json` with the version,
-SHA-256s, and (with `-BaseUrl`) the download URLs. **Upload the three files to
-your release host** at those URLs. `image.version` in the manifest must equal the
-image tag (`emb-hybrid-api:<version>`) and the `APP_VERSION` the desktop compose
-interpolates — `build-release.ps1` keeps them in sync.
+It also records each file's name + SHA-256 in
+`electron/resources/assets.manifest.json` (verified off the USB at setup time).
+`image.version` must equal the image tag (`emb-hybrid-api:<version>`) and the
+`APP_VERSION` the desktop compose interpolates — the script keeps them in sync.
+Docker/Ollama installers and the base models are fetched online, so they are not
+in this bundle.
 
-Ollama and Docker installers are pulled from their official URLs (also in the
-manifest) — no need to host those.
-
-## Build the installers
+### 2. Build the installers
 
 ```bash
 cd electron
@@ -85,6 +97,22 @@ Output lands in `electron/dist/`. Builds are **unsigned** for now — users get 
 "unidentified developer" warning (Windows SmartScreen → *More info → Run anyway*;
 macOS → right-click *Open*). See *Deferred* below.
 
+### 3. Lay out the USB drive
+
+```text
+USB drive
+  EM Knowledge Assistant-Setup-0.1.0.exe   (and/or the .dmg)
+  assets/                                   ← the whole release/ folder
+    emb-hybrid-api-0.1.0.tar.gz
+    neo4j.dump
+    project_data.tar.gz
+```
+
+The app auto-detects `assets/` (removable drives, or next to the installer). If
+it can't, it shows a folder picker — the user selects the `assets` folder. The
+folder is validated (must contain the image tar) and remembered, so an
+interrupted setup resumes without re-picking.
+
 ## Develop / smoke-test the shell
 
 ```bash
@@ -95,12 +123,17 @@ npm start
 
 In dev, bundled resources resolve from the repo root instead of
 `resourcesPath`. To exercise the real first-run flow you need the release assets
-built and the manifest URLs reachable. To re-trigger first-run, delete the
-markers under the app's userData dir:
-`first-run-complete.json`, `graph-imported.json`, `data-ready.json`, `desktop.env`.
+built; point the app at them with `EMB_ASSETS_DIR=<path to release/>` (or let the
+picker find them). To re-trigger first-run, delete the markers under the app's
+userData dir: `first-run-complete.json`, `graph-imported.json`,
+`data-ready.json`, `desktop.env`, `assets-dir.json`.
 
 ## First-run flow details
 
+- **Setup assets**: the image tar, snapshot, and corpus are read from the USB
+  `assets/` folder — auto-detected (removable drives / next to the app / a saved
+  path / `$EMB_ASSETS_DIR`) or chosen via a folder picker, then verified against
+  the manifest SHA-256s. The USB is only needed during first run.
 - **Docker**: silent install isn't possible on Windows (admin + WSL2 + reboot).
   The wizard downloads and launches the official installer, then waits for the
   daemon. If a reboot is needed it shows a "finish installing and reopen" banner;

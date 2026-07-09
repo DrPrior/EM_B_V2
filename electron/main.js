@@ -10,11 +10,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 
 const supervisor = require('./supervisor');
 const paths = require('./lib/paths');
-const { runFirstRun, RebootRequiredError } = require('./lib/firstrun');
+const assets = require('./lib/assets');
+const { runFirstRun, RebootRequiredError, loadManifest } = require('./lib/firstrun');
 const { ensureEnvFile } = require('./lib/envfile');
 
 const APP_URL = 'http://127.0.0.1:8000';
@@ -63,6 +64,34 @@ async function navigateToApp() {
   await mainWindow.loadURL(APP_URL);
 }
 
+/**
+ * Resolve the USB `assets/` folder holding the offline setup files. Tries
+ * auto-detection first; if that fails, prompts the user with a native folder
+ * picker (looping until they choose a valid folder or cancel). Returns the dir
+ * or null if the user cancelled.
+ */
+async function resolveAssetsDir(manifest) {
+  let dir = assets.findAssetsDir(manifest);
+  while (!dir) {
+    const res = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select the setup folder from the USB drive',
+      message: 'Choose the “assets” folder that came with this app on the USB drive.',
+      properties: ['openDirectory'],
+      buttonLabel: 'Use this folder',
+    });
+    if (res.canceled || !res.filePaths.length) return null;
+    const picked = res.filePaths[0];
+    if (assets.isValidDir(picked, manifest)) { dir = picked; break; }
+    await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      message: 'That folder doesn’t contain the setup files.',
+      detail: `Expected to find "${manifest.image.file}" inside it. Pick the "assets" folder from the USB drive.`,
+    });
+  }
+  if (dir) assets.saveDir(dir);
+  return dir;
+}
+
 // Renderer asks what mode to show.
 ipcMain.handle('wizard:getState', () => ({
   firstRunComplete: supervisor.isFirstRunComplete(),
@@ -78,7 +107,12 @@ ipcMain.handle('wizard:begin', async () => {
     if (supervisor.isFirstRunComplete()) {
       await supervisor.quickStart(envPath, (e) => send('progress', e));
     } else {
-      await runFirstRun((e) => send('progress', e));
+      const assetsDir = await resolveAssetsDir(loadManifest());
+      if (!assetsDir) {
+        send('error', { message: 'Setup files not found. Plug in the USB drive that came with the app and try again.' });
+        return { ok: false, error: 'no-assets' };
+      }
+      await runFirstRun((e) => send('progress', e), assetsDir);
     }
     await navigateToApp();
     return { ok: true };

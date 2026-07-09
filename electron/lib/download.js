@@ -66,28 +66,4 @@ function sha256(filePath) {
   });
 }
 
-/**
- * Download only if the cached file is missing or its checksum doesn't match.
- * @param {{url:string, dest:string, sha256?:string}} asset
- */
-async function ensureAsset(asset, onProgress = () => {}) {
-  const { url, dest, sha256: expected } = asset;
-  if (fs.existsSync(dest)) {
-    if (!expected || (await sha256(dest)) === expected) {
-      onProgress({ fraction: 1, transferred: fs.statSync(dest).size, total: fs.statSync(dest).size });
-      return dest;
-    }
-    fs.rmSync(dest); // stale/corrupt — re-download
-  }
-  await downloadFile(url, dest, onProgress);
-  if (expected) {
-    const actual = await sha256(dest);
-    if (actual !== expected) {
-      fs.rmSync(dest);
-      throw new Error(`Checksum mismatch for ${url}: expected ${expected}, got ${actual}`);
-    }
-  }
-  return dest;
-}
-
-module.exports = { downloadFile, sha256, ensureAsset };
+module.exports = { downloadFile, sha256 };

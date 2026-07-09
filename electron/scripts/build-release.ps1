@@ -6,34 +6,34 @@
     corpus archive. Computes SHA-256s and updates electron/resources/assets.manifest.json.
 
 .DESCRIPTION
-    Run this on a maintainer machine that already has a fully built + enriched
-    graph (ingest -> load_manifest -> enrich) and the project_data corpus on disk.
-    Upload the three files in the output dir to your internal release host, then
-    set the matching url fields in assets.manifest.json (a -BaseUrl fills them in).
+    USB delivery — no download server. Run this on a maintainer machine that has
+    a fully built + enriched graph (ingest -> load_manifest -> enrich) and the
+    project_data corpus on disk. Copy the entire output folder onto the USB drive
+    as a folder named `assets` (sitting next to the installer). The app finds it
+    automatically at setup time (or the user points at it).
 
-    Outputs (in -OutDir):
+    Outputs (in -OutDir, default <repo>/release):
       emb-hybrid-api-<Version>.tar.gz   docker save | gzip of the prod image
       neo4j.dump                        Neo4j snapshot (via scripts/export-graph.ps1)
       project_data.tar.gz              the source corpus
+
+    Also records each file's name + SHA-256 in electron/resources/assets.manifest.json
+    (checksums are verified off the USB at setup time). Rebuild the installers
+    after this so the updated manifest ships inside the app.
 
 .PARAMETER Version
     Image/app version tag. The desktop compose runs emb-hybrid-api:<Version> and
     APP_VERSION must equal this. Defaults to the version already in the manifest.
 
-.PARAMETER BaseUrl
-    Optional. If given, the manifest url fields are set to
-    <BaseUrl>/<filename> for you.
-
 .PARAMETER OutDir
-    Output directory. Defaults to <repo>/release.
+    Output directory. Defaults to <repo>/release. Copy this onto the USB as `assets`.
 
 .EXAMPLE
-    pwsh -File electron/scripts/build-release.ps1 -Version 0.1.0 -BaseUrl https://host/emb-hybrid
+    pwsh -File electron/scripts/build-release.ps1 -Version 0.1.0
 #>
 [CmdletBinding()]
 param(
     [string]$Version,
-    [string]$BaseUrl,
     [string]$OutDir
 )
 
@@ -86,20 +86,19 @@ $dataOut = Join-Path $OutDir "project_data.tar.gz"
 tar -czf $dataOut -C $repoRoot project_data
 if ($LASTEXITCODE -ne 0) { throw "tar of project_data failed." }
 
-Write-Host "==> Updating manifest checksums ..." -ForegroundColor Cyan
-$manifest.image.version = $Version
+Write-Host "==> Updating manifest (filenames + checksums) ..." -ForegroundColor Cyan
+$manifest.image.version      = $Version
+$manifest.image.file         = "emb-hybrid-api-$Version.tar.gz"
 $manifest.image.sha256       = Get-Sha256 $imageOut
+$manifest.snapshot.file      = "neo4j.dump"
 $manifest.snapshot.sha256    = Get-Sha256 $dumpOut
+$manifest.projectData.file   = "project_data.tar.gz"
 $manifest.projectData.sha256 = Get-Sha256 $dataOut
-if ($BaseUrl) {
-    $b = $BaseUrl.TrimEnd('/')
-    $manifest.image.url       = "$b/emb-hybrid-api-$Version.tar.gz"
-    $manifest.snapshot.url    = "$b/neo4j.dump"
-    $manifest.projectData.url = "$b/project_data.tar.gz"
-}
 $manifest | ConvertTo-Json -Depth 6 | Set-Content $manifestPath -Encoding UTF8
 
 Write-Host ""
 Write-Host "Done. Assets in $OutDir :" -ForegroundColor Green
 Get-ChildItem $OutDir | Select-Object Name, @{n='SizeMB';e={[math]::Round($_.Length/1MB,1)}} | Format-Table
-Write-Host "Next: upload these to your release host and (if you didn't pass -BaseUrl) set the url fields in $manifestPath." -ForegroundColor Green
+Write-Host "Next steps:" -ForegroundColor Green
+Write-Host "  1. Rebuild installers (npm run dist:win / dist:mac) so the updated manifest ships." -ForegroundColor Green
+Write-Host "  2. Copy this folder onto the USB drive as 'assets', next to the installer." -ForegroundColor Green

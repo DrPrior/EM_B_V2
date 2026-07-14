@@ -10,6 +10,20 @@ and **provisions its models automatically on startup** — you do **not** need t
 pull models or build the custom variants by hand. You only need to install
 Ollama and configure it to accept traffic from the container.
 
+> 📦 **Two ways to run this stack.** For **end users**, the whole thing is now
+> packaged as a one-click **desktop app** (Electron shell in [`electron/`](../electron/))
+> that ships on a **USB drive** and runs a guided first-run wizard: it installs
+> Docker Desktop and Ollama if missing, pulls/builds the models, loads the
+> prebuilt API image and graph snapshot, then supervises the Docker stack — no
+> command line, no manual env-var editing. See [`electron/README.md`](../electron/README.md).
+> That path uses [`docker-compose.desktop.yml`](../docker-compose.desktop.yml)
+> (prebuilt [`Dockerfile.prod`](../Dockerfile.prod) image, no source mount).
+>
+> **This document covers the manual / developer path** (`docker-compose.yml`,
+> hot-reload source mounts) — for building the stack yourself, running the
+> pipeline, or developing the backend. Ollama runs host-native and needs the same
+> one-time setup below either way.
+
 ---
 
 ## One-time host setup
@@ -311,12 +325,16 @@ stack up, or pass the correct `-DockerSubnet`.
   small port-forward that listens only on the Docker adapter (`netsh interface
   portproxy` on Windows, `socat` on macOS). More moving parts (the adapter IP can
   change), but Ollama is never LAN-exposed at all.
-- **Run the app natively (the real long-term fix):** the `0.0.0.0` requirement
-  exists *only because the orchestration app runs in Docker*. If the Python app
-  runs natively on the laptop — or inside the planned desktop (Tauri/Electron)
-  shell — it talks to Ollama over `127.0.0.1:11434` and this exposure disappears
-  entirely. Neo4j can stay in Docker (the app reaches it, not the reverse). For a
-  fleet of roaming, non-technical-user laptops, prefer this.
+- **Run the API natively (the real long-term fix):** the `0.0.0.0` requirement
+  exists *only because the API runs in Docker* and reaches Ollama across the
+  Docker bridge. If the Python API ran natively on the laptop it would talk to
+  Ollama over `127.0.0.1:11434` and this exposure would disappear entirely (Neo4j
+  could stay in Docker — the app reaches it, not the reverse). **Note:** the
+  [desktop app](../electron/README.md) does **not** do this — it *supervises* the
+  same Docker stack (the API still runs in the container and still reaches Ollama
+  over `host.docker.internal`), so it still needs `OLLAMA_HOST=0.0.0.0` and the
+  firewall hardening above. Moving the API out of Docker remains unbuilt; for a
+  fleet of roaming, non-technical-user laptops it is still the preferred fix.
 
 ---
 

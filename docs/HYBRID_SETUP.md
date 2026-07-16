@@ -149,6 +149,40 @@ curl.exe -s -X POST http://localhost:8000/admin/bootstrap-models
 
 ---
 
+## Verify Arc / GPU acceleration
+
+This app has **no GPU code of its own** — all GPU use happens inside host-native
+Ollama, which serves the `chat-model` / `embedding-model` variants and offloads
+them to the host GPU (Apple Metal, NVIDIA CUDA, or **Intel Arc via Vulkan**).
+There is nothing to emulate: "testing on an Intel Arc GPU" means confirming that
+Ollama loaded the models into GPU VRAM on the Arc machine instead of silently
+falling back to CPU. (Intel's **SDE** emulates *CPU* instruction sets, not GPUs,
+and does not apply here.)
+
+Run the bundled check **on the machine with the Arc GPU**, with the stack's
+Ollama running:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-arc-gpu.ps1
+```
+
+It confirms the daemon is reachable, scans `server.log` for the backend Ollama
+selected (`vulkan` / `intel` / `no compatible GPUs`), warms `chat-model` and
+reports tok/s, then reads `/api/ps` (`size` vs `size_vram`) and prints a verdict:
+
+- **`100% GPU`** — fully offloaded to the Arc. This is the goal.
+- **`100% CPU`** — *not* accelerated: Vulkan/Arc was not used. Check the backend
+  log lines it prints, confirm your Ollama version supports this Arc GPU, and if
+  needed try Intel's **ipex-llm** portable Ollama build.
+- **partial split** — the model doesn't fit in Arc VRAM alongside the second
+  resident model (`OLLAMA_MAX_LOADED_MODELS=2`). Use a smaller quant or lower
+  that limit.
+
+Pass `-Model`, `-OllamaHost`, or `-LogPath` to override the defaults (do **not**
+pass `embedding-model` to `-Model` — it has no `/api/generate` endpoint).
+
+---
+
 ## Sharing the graph database
 
 The populated graph lives in a **named Docker volume** (`em_b_v2_neo4j_data`)

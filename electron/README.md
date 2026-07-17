@@ -35,6 +35,7 @@ electron/
     assets.js        locate the USB `assets/` folder (auto-detect + verify)
     docker.js        detect/install Docker, load image, run compose
     ollama.js        detect/install Ollama, pull bases + build variants (streamed)
+    ollamaenv.js     persist host OLLAMA_* env vars (setx / launchd agent) + restart
     modelfile.js     Node port of ollama_bootstrap._parse_modelfile
     snapshot.js      Node port of scripts/import-graph.ps1 (offline dump load)
     compose.js       shared `docker compose --env-file … -f …` invocation
@@ -53,6 +54,20 @@ electron/
 Related files at the repo root: `docker-compose.desktop.yml` (production compose,
 prebuilt image + generated env), `Dockerfile.prod` (lean runtime image),
 `.env.example`.
+
+## Tests
+
+Unit tests use Node's built-in runner (no extra deps):
+
+```bash
+npm test        # runs test/**/*.test.js
+```
+
+`test/ollamaenv.test.js` covers the pure host-env logic (`computeNeedsSetup`, the
+LaunchAgent plist/path, `REQUIRED`). The process-spawning paths
+(`ensure`/`persist*`/`restartOllama`, which call `setx`/`launchctl`/`taskkill`
+and restart Ollama) are intentionally **not** unit-tested — validate those on a
+real machine via the verification checklist below.
 
 ## Preparing a USB drive (maintainer)
 
@@ -143,6 +158,14 @@ userData dir: `first-run-complete.json`, `graph-imported.json`,
   progress bar (`/api/pull` + `/api/create`, streamed). Because the variants are
   built here, the API container's own startup bootstrap hits its instant warm
   path.
+- **Ollama host env** (`lib/ollamaenv.js`): the container reaches Ollama over
+  `host.docker.internal`, which requires the daemon to bind `0.0.0.0`, so the
+  wizard **persists** `OLLAMA_HOST=0.0.0.0`, `OLLAMA_KEEP_ALIVE=-1`, and
+  `OLLAMA_MAX_LOADED_MODELS=2` — via `setx` (user registry) on Windows, and via
+  `launchctl setenv` **plus a RunAtLoad LaunchAgent** on macOS so they survive a
+  reboot/logout (plain `launchctl setenv` doesn't). It then restarts Ollama so
+  the running daemon picks them up. Idempotent: skipped once the values are in
+  place, and re-checked on every launch (`quickStart`) to self-heal drift.
 - **Credentials**: a random Neo4j password is generated once into `desktop.env`
   and reused forever (it's baked into the `em_b_v2_neo4j_data` volume on first
   DB start). Neo4j and the API bind to `127.0.0.1` only.

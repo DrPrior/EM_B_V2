@@ -22,6 +22,7 @@ const paths = require('./paths');
 const gpu = require('./gpu');
 const docker = require('./docker');
 const ollama = require('./ollama');
+const ollamaenv = require('./ollamaenv');
 const snapshot = require('./snapshot');
 const compose = require('./compose');
 const assets = require('./assets');
@@ -84,6 +85,18 @@ async function runFirstRun(emit, assetsDir) {
     step('ollama', 'active', 'Installing Ollama…');
     await ollama.installOllama(manifest, (p) =>
       step('ollama', 'active', p.message || p.line || 'Installing Ollama…', p.fraction ?? null));
+  }
+  // Persist + apply the host env vars the container needs to reach Ollama
+  // (OLLAMA_HOST=0.0.0.0) and to keep both models warm. Idempotent: a no-op once
+  // set. If it had to reconfigure but couldn't relaunch Ollama itself, the user
+  // must restart Ollama before the container step can reach it.
+  step('ollama', 'active', 'Configuring Ollama for the app…');
+  const envRes = await ollamaenv.ensure((msg) => step('ollama', 'active', msg));
+  if (envRes.changed && !envRes.restarted) {
+    step('ollama', 'needs-user',
+      'Ollama needs to restart to accept connections from the app. Quit Ollama ' +
+      '(menu bar / system tray) and reopen it, then click Retry.');
+    throw new Error('Ollama must be restarted to apply required settings');
   }
   step('ollama', 'done', 'Ollama is running.');
 

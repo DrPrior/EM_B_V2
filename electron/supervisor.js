@@ -13,6 +13,7 @@ const http = require('http');
 const compose = require('./lib/compose');
 const docker = require('./lib/docker');
 const ollama = require('./lib/ollama');
+const ollamaenv = require('./lib/ollamaenv');
 const paths = require('./lib/paths');
 
 const HEALTH_URL = { host: '127.0.0.1', port: 8000, path: '/health' };
@@ -75,6 +76,13 @@ async function quickStart(envPath, emit = () => {}) {
   if (!(await ollama.isRunning()) && !(await ollama.waitForRunning(30, 2000))) {
     emit({ step: 'ollama', status: 'needs-user', message: 'Please start Ollama, then retry.' });
     throw new Error('Ollama not running');
+  }
+  // Self-heal the host env vars if something cleared them (e.g. an Ollama update
+  // re-prompted the firewall / reset settings). No-op on the warm path.
+  const envRes = await ollamaenv.ensure((msg) => emit({ step: 'ollama', status: 'active', message: msg }));
+  if (envRes.changed && !envRes.restarted) {
+    emit({ step: 'ollama', status: 'needs-user', message: 'Quit and reopen Ollama to apply required settings, then retry.' });
+    throw new Error('Ollama must be restarted to apply required settings');
   }
   emit({ step: 'ollama', status: 'done', message: 'Ollama is running.' });
 

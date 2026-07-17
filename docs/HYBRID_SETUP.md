@@ -13,9 +13,12 @@ Ollama and configure it to accept traffic from the container.
 > 📦 **Two ways to run this stack.** For **end users**, the whole thing is now
 > packaged as a one-click **desktop app** (Electron shell in [`electron/`](../electron/))
 > that ships on a **USB drive** and runs a guided first-run wizard: it installs
-> Docker Desktop and Ollama if missing, pulls/builds the models, loads the
-> prebuilt API image and graph snapshot, then supervises the Docker stack — no
-> command line, no manual env-var editing. See [`electron/README.md`](../electron/README.md).
+> Docker Desktop and Ollama if missing, **persists the required host env vars for
+> you** (`OLLAMA_HOST=0.0.0.0` etc. — including a macOS login agent so they
+> survive a reboot; see [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js)),
+> pulls/builds the models, loads the prebuilt API image and graph snapshot, then
+> supervises the Docker stack — no command line, no manual env-var editing. See
+> [`electron/README.md`](../electron/README.md).
 > That path uses [`docker-compose.desktop.yml`](../docker-compose.desktop.yml)
 > (prebuilt [`Dockerfile.prod`](../Dockerfile.prod) image, no source mount).
 >
@@ -37,6 +40,12 @@ Ollama and configure it to accept traffic from the container.
   GPUs are used via Vulkan.
 
 ### 2. Set the required host environment variables
+
+> 🖥️ **Desktop-app users can skip this section.** The wizard sets and persists
+> all three variables automatically (on macOS it also installs a login agent so
+> they survive a reboot) and restarts Ollama to apply them —
+> [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js). The steps below are
+> for the **manual / developer path**.
 
 These let the container talk to Ollama and keep both models resident in memory.
 
@@ -79,9 +88,11 @@ launchctl setenv OLLAMA_MAX_LOADED_MODELS "2"
 ```
 Then fully quit and relaunch the Ollama app.
 
-> ⚠️ **macOS gotcha:** `launchctl setenv` survives an Ollama app restart but is
-> **lost on reboot / logout** — you'd have to re-run it. For true persistence,
-> add a **LaunchAgent** that sets them at login. Create
+> ⚠️ **macOS gotcha (manual path only):** `launchctl setenv` survives an Ollama
+> app restart but is **lost on reboot / logout** — you'd have to re-run it. For
+> true persistence, add a **LaunchAgent** that sets them at login. (The desktop
+> app does exactly this automatically — see
+> [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js).) Create
 > `~/Library/LaunchAgents/com.ollama.env.plist`:
 > ```xml
 > <?xml version="1.0" encoding="UTF-8"?>

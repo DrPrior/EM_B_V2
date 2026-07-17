@@ -54,6 +54,10 @@ dist/
 # src/static/vendor/ IS committed so it ships in the image)
 electron/node_modules/
 electron/dist/
+# electron/build/ holds source assets electron-builder consumes (app icons,
+# etc.) — re-include it despite the generic build/ rule above.
+!electron/build/
+!electron/build/**
 # Release assets produced by electron/scripts/build-release.ps1
 release/
 

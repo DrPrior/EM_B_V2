@@ -1,0 +1,24 @@
+{
+  "_comment": "USB delivery, no download server. The three custom assets (image/snapshot/projectData) are read from an `assets/` folder on the USB by filename; build-release.ps1 fills in their sha256. Docker + Ollama installers and the base models still come from the internet (targets are online). image.version MUST match the API image tag (emb-hybrid-api:<version>) and the APP_VERSION the desktop compose interpolates.",
+  "image": {
+    "version": "0.1.0",
+    "file": "emb-hybrid-api-0.1.0.tar.gz",
+    "sha256": "abe98bc7c93c1b33deca0ada69c288af0c10e8e989373a990c7fabd62925a424"
+  },
+  "snapshot": {
+    "file": "neo4j.dump",
+    "sha256": "020cefc970cd9e5a28f887a3987e1427a033ff6f787479f3559687ca967db305"
+  },
+  "projectData": {
+    "file": "project_data.tar.gz",
+    "sha256": "041947401ecddb6eebdf6ddfaeb20c0e2683730a1d1a3e23fb6fa0781e967419"
+  },
+  "ollama": {
+    "win32": "https://ollama.com/download/OllamaSetup.exe",
+    "darwin": "https://ollama.com/download/Ollama.dmg"
+  },
+  "docker": {
+    "win32": "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe",
+    "darwin": "https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+  }
+}

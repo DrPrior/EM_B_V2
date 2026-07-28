@@ -17,6 +17,11 @@ COPY src ./src
 COPY pipeline ./pipeline
 COPY project_data ./project_data
 
+# Modelfiles used by the startup bootstrap to build the custom Ollama variants
+# on the host (src/services/ollama_bootstrap.py). Also bind-mounted in
+# docker-compose.yml for hot-edit during development.
+COPY Modelfile Modelfile.embeddings ./
+
 # Start FastAPI application with uvicorn
 ENV PATH="/app/.venv/bin:$PATH"
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

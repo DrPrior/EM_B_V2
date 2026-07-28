@@ -1,0 +1,37 @@
+# Production image for the Electron desktop app.
+#
+# Built once by the release maintainer, `docker save`d to a tar, shipped/hosted,
+# and `docker load`ed on the end user's machine by the first-run wizard. It runs
+# the exact same FastAPI app as the dev image but:
+#   - installs runtime deps only (requirements.txt, no ruff/pytest)
+#   - does NOT bake project_data (428 MB) — it is bind-mounted read-only at
+#     runtime by docker-compose.desktop.yml so citation links resolve
+#   - no --reload and no source bind mount — the code is baked in
+#
+# Build + export (see electron/scripts/build-image.ps1):
+#   docker build -f Dockerfile.prod -t emb-hybrid-api:<version> .
+#   docker save emb-hybrid-api:<version> -o emb-hybrid-api-<version>.tar
+FROM astral/uv:python3.12-bookworm-slim
+
+WORKDIR /app
+
+# curl is used by the app's health checks / bootstrap; git pulled in for any
+# VCS-based deps in the resolver.
+RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
+
+# Runtime dependencies only.
+COPY requirements.txt ./
+RUN uv venv && \
+    uv pip install -r requirements.txt
+
+# Application code + the Modelfiles the startup bootstrap reads to build the
+# custom Ollama variants (src/services/ollama_bootstrap.py). project_data is
+# intentionally NOT copied — it is mounted read-only at runtime.
+COPY src ./src
+COPY pipeline ./pipeline
+COPY Modelfile Modelfile.embeddings ./
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+# No --reload: code is immutable inside the shipped image.
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

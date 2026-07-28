@@ -1,6 +1,10 @@
 services:
   neo4j:
-    image: neo4j:latest
+    # Pinned (not :latest) so a graph snapshot exported with export-graph.ps1 is
+    # guaranteed to load on a coworker's machine — the store format must match on
+    # both ends. Bump deliberately, and re-export any shared snapshot after a bump.
+    # See docs/HYBRID_SETUP.md → "Sharing the graph database".
+    image: neo4j:2026.04.0
     ports:
       - "7474:7474"
       - "7687:7687"
@@ -18,6 +22,11 @@ services:
       retries: 5
     restart: unless-stopped
   
+  # Hybrid architecture: Ollama runs NATIVELY on the host (not in Docker) so it
+  # can use the host GPU (Metal / CUDA / Vulkan). The API reaches the host
+  # daemon over host.docker.internal and provisions its models on startup via
+  # src/services/ollama_bootstrap.py. See docs/HYBRID_SETUP.md for the one-time
+  # host setup (install Ollama, set OLLAMA_HOST=0.0.0.0).
   api:
     build: .
     ports:
@@ -25,56 +34,27 @@ services:
     environment:
       - NEO4J_AUTH=${NEO4J_AUTH}
       - DB_URI=bolt://neo4j:7687
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - CHAT_MODEL=chat-model
       - EMBEDDING_MODEL=embedding-model
+    # Maps host.docker.internal to the host gateway. Docker Desktop (Win/Mac)
+    # provides this name automatically; host-gateway makes it work on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       neo4j:
-        condition: service_healthy
-      ollama:
         condition: service_healthy
     volumes:
       - ./src:/app/src
       - ./pipeline:/app/pipeline
       - ./project_data:/app/project_data
       - ./tests:/app/tests
+      # Mounted so the startup bootstrap reads the live Modelfiles without a
+      # rebuild (they are also COPYed into the image for prod builds).
+      - ./Modelfile:/app/Modelfile
+      - ./Modelfile.embeddings:/app/Modelfile.embeddings
 
-
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./ollama-startup.sh:/ollama-startup.sh
-      - ./Modelfile:/Modelfile
-      - ./Modelfile.embeddings:/Modelfile.embeddings
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      # `ollama list` succeeds as soon as the daemon is up — well before
-      # ollama-startup.sh finishes pulling models. Gate on the custom variants
-      # (created last by the startup script) so dependents only start once
-      # embeddings/chat are actually usable. start_period covers the first-run
-      # ~10GB model pull; on later runs the models are cached and this passes fast.
-      test: ["CMD-SHELL", "ollama list | grep -q chat-model && ollama list | grep -q embedding-model"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 600s
-    entrypoint: ["/bin/sh", "/ollama-startup.sh"]
-    restart: unless-stopped
-    environment:
-      - OLLAMA_KEEP_ALIVE=-1
-    
 
 volumes:
   neo4j_data:
     name: em_b_v2_neo4j_data
-  ollama_data:

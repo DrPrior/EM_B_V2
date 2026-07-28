@@ -1,0 +1,76 @@
+{
+  "name": "emb-hybrid-desktop",
+  "productName": "EM Knowledge Assistant",
+  "version": "0.2.0",
+  "description": "Self-contained desktop app for the EM_B_Hybrid knowledge-graph assistant. Provisions Docker, Ollama, models, and a prebuilt graph on first run, then runs the local stack.",
+  "author": "EM_B_Hybrid",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/**/*.test.js\"",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "edu.ualr.emb.hybrid",
+    "productName": "EM Knowledge Assistant",
+    "files": [
+      "main.js",
+      "preload.js",
+      "supervisor.js",
+      "lib/**/*",
+      "wizard/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../docker-compose.desktop.yml",
+        "to": "docker-compose.desktop.yml"
+      },
+      {
+        "from": "../Modelfile",
+        "to": "Modelfile"
+      },
+      {
+        "from": "../Modelfile.embeddings",
+        "to": "Modelfile.embeddings"
+      },
+      {
+        "from": "resources/assets.manifest.json",
+        "to": "assets.manifest.json"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true
+  }
+}

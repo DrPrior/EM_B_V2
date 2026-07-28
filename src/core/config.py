@@ -12,20 +12,70 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = Field(
         default="http://localhost:11434",
-        description="Base URL for Ollama API",
+        description=(
+            "Base URL for Ollama API. In the hybrid deployment Ollama runs "
+            "natively on the host, so the container overrides this with "
+            "http://host.docker.internal:11434 via OLLAMA_BASE_URL."
+        ),
     )
     chat_model: str = Field(
         default="chat-model",
         description=(
             "Chat model name for Ollama — the custom variant built from Modelfile "
-            "by ollama-startup.sh (FROM gemma4:12b-it-qat)"
+            "by the startup bootstrap (FROM gemma4:12b-it-qat)"
         ),
     )
     embedding_model: str = Field(
         default="embedding-model",
         description=(
             "Embedding model name for Ollama — the custom variant built from "
-            "Modelfile.embeddings by ollama-startup.sh (FROM qwen3-embedding:4b)"
+            "Modelfile.embeddings by the startup bootstrap (FROM qwen3-embedding:4b)"
+        ),
+    )
+    chat_base_model: str = Field(
+        default="gemma4:12b-it-qat",
+        description=(
+            "Base model the chat-model variant is built FROM. The startup "
+            "bootstrap pulls this onto the host before creating chat-model. Must "
+            "match the FROM line in Modelfile."
+        ),
+    )
+    embedding_base_model: str = Field(
+        default="qwen3-embedding:4b",
+        description=(
+            "Base model the embedding-model variant is built FROM. The startup "
+            "bootstrap pulls this onto the host before creating embedding-model. "
+            "Must match the FROM line in Modelfile.embeddings."
+        ),
+    )
+    ollama_startup_retries: int = Field(
+        default=5,
+        description=(
+            "How many times the startup bootstrap pings host Ollama's /api/version "
+            "before giving up and exiting (the host may not have launched Ollama "
+            "yet when the container boots)."
+        ),
+    )
+    ollama_startup_delay: float = Field(
+        default=3.0,
+        description=(
+            "Seconds to wait between host-Ollama connection attempts during the "
+            "startup bootstrap retry loop."
+        ),
+    )
+    ollama_request_timeout: float = Field(
+        default=10.0,
+        description=(
+            "Timeout (seconds) for lightweight bootstrap calls to host Ollama "
+            "(/api/version, /api/tags). The model pull uses a much longer timeout."
+        ),
+    )
+    ollama_pull_timeout: float = Field(
+        default=1800.0,
+        description=(
+            "Timeout (seconds) for the blocking /api/pull and /api/create calls "
+            "during bootstrap. Generous to cover the first-run ~10GB base-model "
+            "download on a cold host."
         ),
     )
     max_history_turns: int = Field(

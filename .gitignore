@@ -2,6 +2,7 @@
 .env.local
 project_data
 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -25,7 +26,7 @@ env/
 *~
 .DS_Store
 .vscode/settings.json
-EM_B_V1.code-workspace
+EM_B_Hybrid.code-workspace
 
 # Testing
 .pytest_cache/
@@ -40,10 +41,25 @@ test_results.txt
 # Docker
 .dockerignore
 
+# Neo4j graph snapshots (share out-of-band or via Git LFS — a .dump with
+# embeddings is large). scripts/export-graph.ps1 writes here.
+snapshot/
+
 # Build artifacts
 build/
 dist/
 *.so
+
+# Electron desktop app build outputs (source under electron/ IS committed;
+# src/static/vendor/ IS committed so it ships in the image)
+electron/node_modules/
+electron/dist/
+# electron/build/ holds source assets electron-builder consumes (app icons,
+# etc.) — re-include it despite the generic build/ rule above.
+!electron/build/
+!electron/build/**
+# Release assets produced by electron/scripts/build-release.ps1
+release/
 
 
 #test outputs and logs

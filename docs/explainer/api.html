@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API surface — EM_B_Hybrid</title>
+<link rel="stylesheet" href="explainer.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><a href="index.html">EM_B_Hybrid · Code Explainer</a></div>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="pipeline.html">Pipeline</a>
+      <a href="rag.html">RAG&nbsp;query</a>
+      <a href="graph-schema.html">Graph</a>
+      <a href="api.html" class="active">API</a>
+      <a href="deployment.html">Deployment</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>API surface and cross-cutting concerns</h1>
+<p class="lede">
+  Four routers, a singleton database driver, an in-memory session store, per-IP rate limiting, and a
+  timing logger. Interactive docs are generated at <code>http://localhost:8000/docs</code>.
+</p>
+
+<h2>How a request travels</h2>
+
+<figure>
+<svg viewBox="0 0 880 420" role="img" aria-label="Layers a request passes through: rate limiter, router, dependencies, service, database">
+  <defs>
+    <marker id="a-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <rect x="30" y="20" width="200" height="54" rx="8" class="d-sky"/>
+  <text x="130" y="43" class="d-t sm b d-c">HTTP request</text>
+  <text x="130" y="61" class="d-m xs d-c">uvicorn → FastAPI</text>
+  <path d="M 130 78 L 130 104" class="d-arrow" marker-end="url(#a-ah)"/>
+
+  <rect x="30" y="106" width="200" height="66" rx="8" class="d-rose"/>
+  <text x="130" y="128" class="d-t sm b d-c">@limiter.limit</text>
+  <text x="130" y="146" class="d-m xs d-c">keyed on remote address</text>
+  <text x="130" y="162" class="d-m xs d-c">over limit → HTTP 429</text>
+  <path d="M 130 176 L 130 202" class="d-arrow" marker-end="url(#a-ah)"/>
+
+  <rect x="30" y="204" width="200" height="66" rx="8" class="d-accent"/>
+  <text x="130" y="226" class="d-t sm b d-c">Pydantic validation</text>
+  <text x="130" y="244" class="d-m xs d-c">ChatRequest.strip_whitespace</text>
+  <text x="130" y="260" class="d-m xs d-c">empty question → 422</text>
+  <path d="M 130 274 L 130 300" class="d-arrow" marker-end="url(#a-ah)"/>
+
+  <rect x="30" y="302" width="200" height="66" rx="8" class="d-accent"/>
+  <text x="130" y="324" class="d-t sm b d-c">route handler</text>
+  <text x="130" y="342" class="d-m xs d-c">plain def — not async</text>
+  <text x="130" y="358" class="d-m xs d-c">runs on the threadpool</text>
+
+  <path d="M 234 335 L 296 335" class="d-arrow" marker-end="url(#a-ah)"/>
+
+  <rect x="300" y="204" width="230" height="164" rx="8" class="d-panel"/>
+  <text x="316" y="226" class="d-m b">DEPENDENCIES</text>
+  <rect x="314" y="238" width="202" height="56" rx="6" class="d-box"/>
+  <text x="415" y="260" class="d-t sm b d-c">Depends(get_db_session)</text>
+  <text x="415" y="278" class="d-m xs d-c">one Neo4j session per request</text>
+  <rect x="314" y="300" width="202" height="56" rx="6" class="d-green"/>
+  <text x="415" y="322" class="d-t sm b d-c">closed in finally</text>
+  <text x="415" y="340" class="d-m xs d-c">after the response is built</text>
+
+  <path d="M 415 198 L 415 172" class="d-arrow" marker-end="url(#a-ah)"/>
+  <rect x="300" y="106" width="230" height="66" rx="8" class="d-green"/>
+  <text x="415" y="128" class="d-t sm b d-c">Neo4jConnection</text>
+  <text x="415" y="146" class="d-m xs d-c">singleton driver, created in lifespan</text>
+  <text x="415" y="162" class="d-m xs d-c">double-checked locking</text>
+
+  <path d="M 534 335 L 596 335" class="d-arrow" marker-end="url(#a-ah)"/>
+  <rect x="600" y="302" width="250" height="66" rx="8" class="d-amber"/>
+  <text x="725" y="324" class="d-t sm b d-c">service layer</text>
+  <text x="725" y="342" class="d-m xs d-c">RAGService · embeddings · llm</text>
+  <text x="725" y="358" class="d-m xs d-c">no globals, no request objects</text>
+
+  <rect x="600" y="20" width="250" height="252" rx="8" class="d-panel"/>
+  <text x="616" y="42" class="d-m b">ACCESS MODE PER ROUTER</text>
+  <rect x="614" y="56" width="222" height="52" rx="6" class="d-box"/>
+  <text x="725" y="76" class="d-t sm b d-c">chat · graph</text>
+  <text x="725" y="94" class="d-m mono d-c">READ_ACCESS</text>
+  <rect x="614" y="118" width="222" height="52" rx="6" class="d-box"/>
+  <text x="725" y="138" class="d-t sm b d-c">admin</text>
+  <text x="725" y="156" class="d-m mono d-c">WRITE_ACCESS (default)</text>
+  <text x="616" y="192" class="d-m xs">Neo4j Community has no read-only user,</text>
+  <text x="616" y="207" class="d-m xs">so a READ session is the closest guard:</text>
+  <text x="616" y="222" class="d-m xs">the server rejects writes inside it.</text>
+  <text x="616" y="248" class="d-m xs">Each router defines its own get_session().</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../src/main.py">main.py:87</a> registers the limiter and its 429 handler ·
+  <a class="ref" href="../../src/database/connection.py">connection.py:164</a> is the session
+  dependency generator · <a class="ref" href="../../src/routers/chat.py">chat.py:100</a> is the
+  read-only variant.
+</figcaption>
+</figure>
+
+<h2>Endpoints</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Endpoint</th><th>What it does</th><th>Code</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="tag post">POST</span> <code>/chat/</code></td>
+      <td>Full answer in one response — <code>{answer, session_id, sources}</code>. Rate limited.</td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:108</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag post">POST</span> <code>/chat/stream</code></td>
+      <td>SSE: one <code>metadata</code> event, then <code>token</code> events, then <code>done</code> (or <code>error</code>). Rate limited.</td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:145</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag get">GET</span> <code>/chat/sessions/{id}/history</code></td>
+      <td>Full retained history for a session; 404 if unknown.</td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:186</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag delete">DELETE</span> <code>/chat/sessions/{id}</code></td>
+      <td>Drop a session. 204 on success, 404 if it never existed.</td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:198</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag post">POST</span> <code>/admin/ingest</code></td>
+      <td>Run the ingestion pipeline. Body <code>{"data_root": …}</code>, defaults to <code>/app/project_data</code>.</td>
+      <td><a class="ref" href="../../src/routers/admin.py">admin.py:66</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag post">POST</span> <code>/admin/load-manifest</code></td>
+      <td>Load MANIFEST*.md metadata. Run after ingest.</td>
+      <td><a class="ref" href="../../src/routers/admin.py">admin.py:86</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag post">POST</span> <code>/admin/bootstrap-models</code></td>
+      <td>Re-provision host Ollama models without restarting the container. 503 if the daemon is unreachable.</td>
+      <td><a class="ref" href="../../src/routers/admin.py">admin.py:112</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag get">GET</span> <code>/graph/nodes</code></td>
+      <td>First 10 nodes of any label — a smoke test for "is there anything in here".</td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:36</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag get">GET</span> <code>/graph/nodes/{id}</code></td>
+      <td>One node by Neo4j element ID.</td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:98</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag get">GET</span> <code>/graph/search?q=</code></td>
+      <td>Substring sweep across every property of every node, capped at 20.</td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:167</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag post">POST</span> <code>/graph/search</code></td>
+      <td>Embed the query text and hit the vector index directly — retrieval without the LLM.</td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:259</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag get">GET</span> <code>/files/{path}</code></td>
+      <td>Stream an original source document inline, with a traversal guard.</td>
+      <td><a class="ref" href="../../src/routers/files.py">files.py:23</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag get">GET</span> <code>/health</code></td>
+      <td>Liveness. The Electron supervisor polls this to decide when the stack is ready.</td>
+      <td><a class="ref" href="../../src/main.py">main.py:97</a></td>
+    </tr>
+    <tr>
+      <td><span class="tag get">GET</span> <code>/</code></td>
+      <td>The chat UI. <code>StaticFiles</code> is mounted <em>last</em> so it cannot shadow API routes.</td>
+      <td><a class="ref" href="../../src/main.py">main.py:108</a></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note">
+  <strong>One text-search subtlety</strong>
+  <p>
+    <code>GET /graph/search</code> uses <code>toStringOrNull</code> rather than <code>toString</code>
+    (<a class="ref" href="../../src/routers/graph.py">graph.py:237</a>). Chunk nodes carry a 2560-element
+    <code>embedding</code> array; <code>toString</code> on an array raises, whereas
+    <code>toStringOrNull</code> yields null and the <code>CONTAINS</code> simply evaluates falsey. Without
+    it, every search over a populated graph would error.
+  </p>
+</div>
+
+<h2>Session management</h2>
+
+<figure>
+<svg viewBox="0 0 880 300" role="img" aria-label="Conversation store structure and history capping">
+  <defs>
+    <marker id="ss-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="20" width="290" height="180" rx="9" class="d-accent"/>
+  <text x="165" y="46" class="d-t sm b d-c">conversation_store</text>
+  <text x="165" y="64" class="d-m xs d-c">module-level singleton · threading.Lock</text>
+  <rect x="38" y="78" width="254" height="34" rx="6" class="d-box"/>
+  <text x="52" y="99" class="d-m mono">"a1b2…" → _SessionData</text>
+  <rect x="38" y="118" width="254" height="34" rx="6" class="d-box"/>
+  <text x="52" y="139" class="d-m mono">"c3d4…" → _SessionData</text>
+  <rect x="38" y="158" width="254" height="30" rx="6" class="d-box"/>
+  <text x="52" y="178" class="d-m mono">… keyed by UUID4</text>
+
+  <path d="M 314 110 L 356 110" class="d-arrow" marker-end="url(#ss-ah)"/>
+
+  <rect x="360" y="20" width="500" height="180" rx="9" class="d-panel"/>
+  <text x="378" y="44" class="d-m b">_SessionData — deque(maxlen = max_history_turns × 2)</text>
+
+  <g class="d-box">
+    <rect x="378" y="58" width="86" height="34" rx="5"/>
+    <rect x="470" y="58" width="86" height="34" rx="5"/>
+  </g>
+  <text x="421" y="79" class="d-m xs d-c">user</text>
+  <text x="513" y="79" class="d-m xs d-c">assistant</text>
+
+  <g class="d-green">
+    <rect x="580" y="58" width="86" height="34" rx="5"/>
+    <rect x="672" y="58" width="86" height="34" rx="5"/>
+  </g>
+  <text x="623" y="79" class="d-m xs d-c">user</text>
+  <text x="715" y="79" class="d-m xs d-c">assistant</text>
+
+  <text x="772" y="79" class="d-m xs">newest →</text>
+
+  <path d="M 378 104 L 340 104 L 340 130" class="d-arrow" marker-end="url(#ss-ah)"/>
+  <text x="378" y="126" class="d-m xs">oldest turn is evicted automatically once the deque is full — no explicit trimming code</text>
+  <text x="378" y="150" class="d-m xs">created_at and last_active are recorded but nothing expires sessions today</text>
+  <text x="378" y="176" class="d-t sm b" style="fill:var(--rose)">In-memory only: every session is lost when the container restarts or hot-reloads.</text>
+
+  <rect x="20" y="220" width="840" height="62" rx="9" class="d-box"/>
+  <text x="38" y="244" class="d-t sm b">Why a lock and not asyncio primitives</text>
+  <text x="38" y="264" class="d-t sm">Route handlers are plain <tspan class="d-t sm mono">def</tspan>, so FastAPI runs them on a threadpool — genuinely concurrent threads mutating one dict. A <tspan class="d-t sm mono">threading.Lock</tspan> is the right tool.</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../src/services/session.py">session.py:22</a>. Read the history with
+  <code>get_or_create</code> at the start of retrieval; write it back with <code>add_turn</code> after
+  generation completes.
+</figcaption>
+</figure>
+
+<h2>Rate limiting</h2>
+
+<p>
+  <a class="ref" href="../../src/core/rate_limit.py">rate_limit.py:14</a> creates a single
+  <code>slowapi</code> limiter keyed on the client address. It is attached to the app and paired with
+  the library's 429 handler in <a class="ref" href="../../src/main.py">main.py:87</a>, then applied to
+  both chat endpoints with <code>@limiter.limit(chat_rate_limit)</code>.
+</p>
+
+<p>
+  The limit is passed as a <em>callable</em>, not a string. That is deliberate
+  (<a class="ref" href="../../src/core/rate_limit.py">rate_limit.py:17</a>): it is evaluated per request,
+  so changing <code>settings.rate_limit_per_minute</code> takes effect without reimporting the module —
+  which is what lets tests tune it.
+</p>
+
+<div class="note warn">
+  <strong>slowapi requires the parameter to be named <code>request</code></strong>
+  <p>
+    Both decorated handlers take <code>request: Request</code> as their first argument even though
+    neither body uses it. Remove or rename it and the decorator raises at startup.
+  </p>
+</div>
+
+<h2 id="timing">Timing instrumentation</h2>
+
+<p>
+  <a class="ref" href="../../src/core/timing.py">timing.py</a> answers "where did the seconds go" without
+  changing any public API. Two kinds of line are emitted to the <code>em_b.timing</code> logger, joined
+  by a short session id.
+</p>
+
+<figure>
+<svg viewBox="0 0 880 320" role="img" aria-label="Anatomy of the two timing log line formats">
+  <text x="20" y="26" class="d-m b">ONE PER QUERY — wall clock, from the timed() context manager</text>
+  <rect x="20" y="38" width="840" height="46" rx="7" class="d-box"/>
+  <text x="36" y="66" class="d-t mono">rag stages sid=a1b2c3d4 embed=88.4ms vector_query=41.2ms extract_entities=1932.7ms graph_query=63.9ms retrieval_total=2126.2ms</text>
+
+  <text x="164" y="102" class="d-m xs d-c">correlator</text>
+  <path d="M 164 88 L 164 96" class="d-line"/>
+  <text x="512" y="102" class="d-m xs d-c">usually the dominant cost — an LLM call</text>
+  <path d="M 512 88 L 512 96" class="d-line"/>
+
+  <text x="20" y="148" class="d-m b">ONE PER OLLAMA CALL — the model's own internal timings, in nanoseconds, converted to ms</text>
+  <rect x="20" y="160" width="840" height="46" rx="7" class="d-box"/>
+  <text x="36" y="188" class="d-t mono">ollama call=chat model=chat-model load=12.0ms prompt_eval=402.1ms(1854tok) eval=4310.8ms(212tok,49.2tok/s) total=4735.6ms sid=a1b2c3d4</text>
+
+  <text x="242" y="224" class="d-m xs d-c">model load</text>
+  <path d="M 242 210 L 242 218" class="d-line"/>
+  <text x="430" y="224" class="d-m xs d-c">reading the prompt</text>
+  <path d="M 430 210 L 430 218" class="d-line"/>
+  <text x="620" y="224" class="d-m xs d-c">generating tokens</text>
+  <path d="M 620 210 L 620 218" class="d-line"/>
+
+  <rect x="20" y="244" width="840" height="62" rx="8" class="d-green"/>
+  <text x="38" y="268" class="d-t sm b">What to look for</text>
+  <text x="38" y="288" class="d-t sm">A high <tspan class="d-t sm mono">load=</tspan> on repeat queries means the model was evicted between calls — set OLLAMA_KEEP_ALIVE on the host. Growing <tspan class="d-t sm mono">prompt_eval</tspan> means the context is filling up.</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../src/core/timing.py">timing.py:50</a> parses Ollama's duration fields ·
+  <a class="ref" href="../../src/core/timing.py">timing.py:124</a> is the <code>timed()</code> context
+  manager · both no-op when <code>timing_log_enabled</code> is false. Streaming generation is timed from
+  the final <code>done</code> chunk (<a class="ref" href="../../src/services/llm.py">llm.py:100</a>).
+</figcaption>
+</figure>
+
+<h2>Configuration</h2>
+
+<p>
+  Everything tuneable is a field on <code>Settings</code>
+  (<a class="ref" href="../../src/core/config.py">config.py:5</a>), a pydantic-settings model reading
+  <code>.env</code> case-insensitively. The module-level <code>settings</code> instance is imported
+  directly everywhere else.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Group</th><th>Settings</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Ollama connection</td>
+      <td><code>ollama_base_url</code>, <code>chat_model</code>, <code>embedding_model</code>, <code>chat_base_model</code>, <code>embedding_base_model</code></td>
+      <td>The variant names and their base models must stay in lockstep with the <code>FROM</code> lines in the Modelfiles</td>
+    </tr>
+    <tr>
+      <td>Bootstrap timeouts</td>
+      <td><code>ollama_startup_retries</code> (5), <code>ollama_startup_delay</code> (3s), <code>ollama_request_timeout</code> (10s), <code>ollama_pull_timeout</code> (1800s)</td>
+      <td>The pull timeout is generous because a cold host downloads ~10 GB</td>
+    </tr>
+    <tr>
+      <td>Retrieval</td>
+      <td><code>retrieval_top_k</code>, <code>vector_retrieval_min_score</code>, <code>graph_retrieval_min_score</code>, <code>graph_retrieval_limit</code></td>
+      <td>See the <a href="rag.html">merge funnel</a></td>
+    </tr>
+    <tr>
+      <td>Ingestion</td>
+      <td><code>chunk_max_tokens</code> (512), <code>chunk_overlap_tokens</code> (64), <code>data_root</code></td>
+      <td><code>data_root</code> does double duty: ingestion root and the base for <code>/files</code> URLs</td>
+    </tr>
+    <tr>
+      <td>Conversation</td>
+      <td><code>max_history_turns</code> (10)</td>
+      <td>Multiplied by two to size the message deque</td>
+    </tr>
+    <tr>
+      <td>Guardrails</td>
+      <td><code>rate_limit_per_minute</code> (20), <code>entity_extraction_max_tokens</code> (256)</td>
+      <td>The token cap bounds the latency of the per-query extraction call</td>
+    </tr>
+    <tr>
+      <td>Observability</td>
+      <td><code>timing_log_enabled</code>, <code>timing_log_level</code></td>
+      <td>Master switch; helpers become no-ops when off</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Two values are <em>not</em> in <code>Settings</code> — <code>NEO4J_AUTH</code> and <code>DB_URI</code>
+  are read straight from the environment by
+  <a class="ref" href="../../src/database/connection.py">connection.py:51</a>, which raises a
+  descriptive <code>ValueError</code> if either is missing or malformed.
+</p>
+
+<h2>Response models</h2>
+
+<p>
+  Every route declares a <code>response_model</code>. Neo4j records are mapped into Pydantic models
+  before leaving a handler — <code>NodeResponse</code> and <code>SearchResponse</code> live in
+  <a class="ref" href="../../src/models.py">models.py:10</a>, while the chat-specific
+  <code>ChatRequest</code>, <code>Source</code>, <code>ChatResponse</code> and
+  <code>HistoryResponse</code> are colocated with their router at
+  <a class="ref" href="../../src/routers/chat.py">chat.py:24</a>.
+</p>
+
+<p>
+  <code>Source</code> is worth a look: <code>url</code> and <code>superseded_by</code> are both nullable,
+  and <code>superseded_by</code> is only populated when a <code>SUPERSEDES</code> edge was found — which
+  is what drives the amber warning under a citation in the UI
+  (<a class="ref" href="../../src/static/app.js">app.js:88</a>).
+</p>
+
+<h2>Tests</h2>
+
+<p>
+  <code>tests/unit/</code> holds one module per source module, plus
+  <code>tests/integration/test_live_stack.py</code> which exercises a running stack. Run them inside the
+  container so imports and paths match production:
+</p>
+
+<pre><code>docker exec em_b_v2-api-1 pytest
+docker exec em_b_v2-api-1 pytest tests/test_rag.py -v
+docker exec em_b_v2-api-1 pytest -m unit</code></pre>
+
+<div class="pagenav">
+  <a href="rag.html">← The RAG query path</a>
+  <a href="deployment.html">Next: Deployment →</a>
+</div>
+
+</main>
+</body>
+</html>

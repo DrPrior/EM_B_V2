@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The build pipeline — EM_B_Hybrid</title>
+<link rel="stylesheet" href="explainer.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><a href="index.html">EM_B_Hybrid · Code Explainer</a></div>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="pipeline.html" class="active">Pipeline</a>
+      <a href="rag.html">RAG&nbsp;query</a>
+      <a href="graph-schema.html">Graph</a>
+      <a href="api.html">API</a>
+      <a href="deployment.html">Deployment</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>The build pipeline</h1>
+<p class="lede">
+  Three stages turn a folder of documents into a queryable knowledge graph. They must run in order —
+  each one depends on nodes the previous stage created — and each is safe to rerun.
+</p>
+
+<h2>Run order, and why it matters</h2>
+
+<figure>
+<svg viewBox="0 0 900 400" role="img" aria-label="The three pipeline stages and the graph elements each one writes">
+  <defs>
+    <marker id="p-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <rect x="14" y="30" width="270" height="106" rx="9" class="d-violet"/>
+  <text x="149" y="60" class="d-t b d-c">1 · pipeline/ingest.py</text>
+  <text x="149" y="82" class="d-t sm d-c">walk the tree, read text,</text>
+  <text x="149" y="100" class="d-t sm d-c">chunk it, embed every chunk</text>
+  <text x="149" y="122" class="d-m mono d-c">needs Ollama</text>
+
+  <rect x="315" y="30" width="270" height="106" rx="9" class="d-violet"/>
+  <text x="450" y="60" class="d-t b d-c">2 · pipeline/load_manifest.py</text>
+  <text x="450" y="82" class="d-t sm d-c">parse MANIFEST*.md tables,</text>
+  <text x="450" y="100" class="d-t sm d-c">attach catalogue metadata</text>
+  <text x="450" y="122" class="d-m mono d-c">no LLM calls</text>
+
+  <rect x="616" y="30" width="270" height="106" rx="9" class="d-violet"/>
+  <text x="751" y="60" class="d-t b d-c">3 · pipeline/enrich.py</text>
+  <text x="751" y="82" class="d-t sm d-c">ask the LLM for entities</text>
+  <text x="751" y="100" class="d-t sm d-c">and a document type</text>
+  <text x="751" y="122" class="d-m mono d-c">needs Ollama</text>
+
+  <path d="M 288 83 L 311 83" class="d-arrow" marker-end="url(#p-ah)"/>
+  <path d="M 589 83 L 612 83" class="d-arrow" marker-end="url(#p-ah)"/>
+
+  <!-- what each writes -->
+  <path d="M 149 140 L 149 176" class="d-arrow" marker-end="url(#p-ah)"/>
+  <path d="M 450 140 L 450 176" class="d-arrow" marker-end="url(#p-ah)"/>
+  <path d="M 751 140 L 751 176" class="d-arrow" marker-end="url(#p-ah)"/>
+
+  <rect x="14" y="180" width="270" height="122" rx="9" class="d-box"/>
+  <text x="149" y="202" class="d-m b d-c">WRITES</text>
+  <text x="30" y="224" class="d-t sm mono">Directory</text>
+  <text x="30" y="244" class="d-t sm mono">File  (.filepath unique)</text>
+  <text x="30" y="264" class="d-t sm mono">Chunk (.text .sequence)</text>
+  <text x="30" y="284" class="d-t sm mono">Chunk.embedding — 2560 floats</text>
+
+  <rect x="315" y="180" width="270" height="122" rx="9" class="d-box"/>
+  <text x="450" y="202" class="d-m b d-c">WRITES</text>
+  <text x="331" y="224" class="d-t sm mono">File.title</text>
+  <text x="331" y="244" class="d-t sm mono">Category Source Edition</text>
+  <text x="331" y="264" class="d-t sm mono">WhyItMatters Validated</text>
+  <text x="331" y="284" class="d-t sm mono">Tranche Access · SUPERSEDES</text>
+
+  <rect x="616" y="180" width="270" height="122" rx="9" class="d-box"/>
+  <text x="751" y="202" class="d-m b d-c">WRITES</text>
+  <text x="632" y="224" class="d-t sm mono">Concept Organization</text>
+  <text x="632" y="244" class="d-t sm mono">LegalReference Course</text>
+  <text x="632" y="264" class="d-t sm mono">MaterialType</text>
+  <text x="632" y="284" class="d-t sm mono">Chunk.enriched = true</text>
+
+  <rect x="14" y="326" width="872" height="58" rx="9" class="d-rose"/>
+  <text x="34" y="350" class="d-t sm b">Ordering hazard</text>
+  <text x="34" y="370" class="d-t sm">Run stage 2 before stage 1 and manifest rows whose category column has no matching on-disk folder create duplicate catalogue nodes at synthetic paths.</text>
+</svg>
+<figcaption>
+  Stage 2 matches rows to File nodes <em>by filename</em>, so those nodes must already exist. Full
+  rebuild order is <code>ingest → load_manifest → enrich</code>
+  (<a class="ref" href="../../CLAUDE.md">CLAUDE.md</a>).
+</figcaption>
+</figure>
+
+<h2>Stage 1 — ingestion</h2>
+
+<p>
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:425</a> is the orchestrator. Everything
+  above it in the file is a helper: file discovery, text extraction per format, chunking, and one
+  small function per Cypher write.
+</p>
+
+<figure>
+<svg viewBox="0 0 760 700" role="img" aria-label="Ingestion flowchart from file discovery through embedding storage">
+  <defs>
+    <marker id="i-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <rect x="230" y="14" width="300" height="52" rx="8" class="d-sky"/>
+  <text x="380" y="38" class="d-t b d-c">discover_files(data_root)</text>
+  <text x="380" y="56" class="d-m xs d-c">rglob, keep .txt .md .pdf .docx .pptx, skip MANIFEST*.md</text>
+  <path d="M 380 68 L 380 92" class="d-arrow" marker-end="url(#i-ah)"/>
+
+  <rect x="180" y="94" width="400" height="562" rx="10" class="d-panel"/>
+  <text x="198" y="116" class="d-m b">FOR EACH FILE</text>
+
+  <!-- decision -->
+  <path d="M 380 130 L 520 168 L 380 206 L 240 168 Z" class="d-amber"/>
+  <text x="380" y="164" class="d-t sm b d-c">is_file_embedded?</text>
+  <text x="380" y="182" class="d-m xs d-c">all chunks have an embedding</text>
+
+  <path d="M 520 168 L 620 168 L 620 210" class="d-arrow" marker-end="url(#i-ah)"/>
+  <text x="570" y="160" class="d-m xs d-c">yes</text>
+  <rect x="560" y="212" width="180" height="44" rx="8" class="d-box"/>
+  <text x="650" y="232" class="d-t sm b d-c">skip</text>
+  <text x="650" y="248" class="d-m xs d-c">already done</text>
+
+  <path d="M 380 208 L 380 232" class="d-arrow" marker-end="url(#i-ah)"/>
+  <text x="394" y="226" class="d-m xs">no</text>
+
+  <rect x="230" y="234" width="300" height="46" rx="8" class="d-box"/>
+  <text x="380" y="254" class="d-t sm b d-c">read_file_content</text>
+  <text x="380" y="271" class="d-m xs d-c">pypdf · python-docx · python-pptx · plain text</text>
+  <path d="M 380 282 L 380 302" class="d-arrow" marker-end="url(#i-ah)"/>
+
+  <rect x="230" y="304" width="300" height="46" rx="8" class="d-green"/>
+  <text x="380" y="324" class="d-t sm b d-c">create_directory_hierarchy</text>
+  <text x="380" y="341" class="d-m xs d-c">MERGE every ancestor, link with CONTAINS_DIR</text>
+  <path d="M 380 352 L 380 372" class="d-arrow" marker-end="url(#i-ah)"/>
+
+  <rect x="230" y="374" width="300" height="46" rx="8" class="d-green"/>
+  <text x="380" y="394" class="d-t sm b d-c">create_file_node</text>
+  <text x="380" y="411" class="d-m xs d-c">MERGE (:File {filepath}) — the unique key</text>
+  <path d="M 380 422 L 380 442" class="d-arrow" marker-end="url(#i-ah)"/>
+
+  <rect x="230" y="444" width="300" height="46" rx="8" class="d-rose"/>
+  <text x="380" y="464" class="d-t sm b d-c">clear_file_chunks</text>
+  <text x="380" y="481" class="d-m xs d-c">chunk_ids are fresh UUIDs — drop stale ones first</text>
+  <path d="M 380 492 L 380 512" class="d-arrow" marker-end="url(#i-ah)"/>
+
+  <rect x="230" y="514" width="300" height="46" rx="8" class="d-box"/>
+  <text x="380" y="534" class="d-t sm b d-c">chunk_text(content, 512, 64)</text>
+  <text x="380" y="551" class="d-m xs d-c">semantic split, overlap carried forward</text>
+  <path d="M 380 562 L 380 582" class="d-arrow" marker-end="url(#i-ah)"/>
+
+  <rect x="214" y="584" width="332" height="60" rx="8" class="d-accent"/>
+  <text x="380" y="606" class="d-t sm b d-c">for each chunk: create node → embed → SET c.embedding</text>
+  <text x="380" y="626" class="d-m xs d-c">one Ollama /api/embeddings call and one write transaction per chunk</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:210</a> <code>is_file_embedded</code> ·
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:270</a> <code>create_directory_hierarchy</code> ·
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:330</a> <code>clear_file_chunks</code> ·
+  <a class="ref" href="../../src/services/embeddings.py">embeddings.py:41</a> <code>embed_and_store_chunk</code>
+</figcaption>
+</figure>
+
+<h3>The idempotency rule is stricter than it looks</h3>
+
+<p>
+  <code>is_file_embedded</code> returns true only when a file has at least one chunk <em>and</em> none
+  of its chunks is missing an embedding. A run interrupted halfway — say Ollama died mid-file — leaves
+  a partially embedded file, which fails the check and gets reprocessed from scratch. That is why
+  <code>clear_file_chunks</code> runs before re-chunking: chunk IDs are regenerated as fresh UUIDs on
+  every run, so without the clear you would accumulate duplicates.
+</p>
+
+<h3>Chunking</h3>
+
+<p>
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:149</a> splits on sentence endings, blank
+  lines, and newlines preceding a capital letter or a bullet marker — the last rule is what keeps
+  PowerPoint slides and bullet lists coherent. Segments are then packed greedily up to
+  <code>chunk_max_tokens × 4</code> characters, and the tail of the finished chunk is prepended to the
+  next one.
+</p>
+
+<figure>
+<svg viewBox="0 0 860 250" role="img" aria-label="Chunk packing with overlap between consecutive chunks">
+  <text x="16" y="26" class="d-m b">SEGMENTS after the regex split</text>
+  <g>
+    <rect x="16" y="38" width="120" height="30" rx="4" class="d-box"/>
+    <rect x="142" y="38" width="180" height="30" rx="4" class="d-box"/>
+    <rect x="328" y="38" width="90"  height="30" rx="4" class="d-box"/>
+    <rect x="424" y="38" width="210" height="30" rx="4" class="d-box"/>
+    <rect x="640" y="38" width="140" height="30" rx="4" class="d-box"/>
+    <rect x="786" y="38" width="58"  height="30" rx="4" class="d-box"/>
+  </g>
+
+  <text x="16" y="106" class="d-m b">PACKED into chunks of ≤ 512 tokens (~2048 chars)</text>
+
+  <rect x="16" y="118" width="402" height="40" rx="6" class="d-accent"/>
+  <text x="217" y="143" class="d-t sm b d-c">chunk 0</text>
+
+  <rect x="328" y="170" width="452" height="40" rx="6" class="d-accent"/>
+  <text x="554" y="195" class="d-t sm b d-c">chunk 1</text>
+
+  <rect x="328" y="118" width="90" height="92" rx="6" fill="none" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="373" y="232" class="d-t xs b d-c" style="fill:var(--amber)">64-token overlap</text>
+  <text x="373" y="246" class="d-m xs d-c">tail of chunk 0 opens chunk 1</text>
+
+  <text x="800" y="143" class="d-m xs">…</text>
+</svg>
+<figcaption>
+  The overlap gives the retriever a second chance at facts that straddle a boundary. Token counts are
+  approximated at 4 characters per token (<a class="ref" href="../../pipeline/ingest.py">ingest.py:135</a>)
+  — cheap and good enough for sizing.
+</figcaption>
+</figure>
+
+<h2>Stage 2 — manifest loading</h2>
+
+<p>
+  The corpus ships with hand-maintained <code>MANIFEST*.md</code> files: markdown tables of filename,
+  title, category, source URL, edition, "why it matters", and a validation column.
+  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:107</a> finds the one table
+  whose header contains <code>filename</code>, <code>title</code> and <code>category</code> and ignores
+  every other table and all prose in the file.
+</p>
+
+<p>
+  Rows are attached to File nodes using <strong>hybrid resolution</strong>, which is the subtle part of
+  this stage:
+</p>
+
+<figure>
+<svg viewBox="0 0 860 320" role="img" aria-label="Hybrid resolution of a manifest row to a File node">
+  <defs>
+    <marker id="m-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <rect x="16" y="16" width="240" height="60" rx="8" class="d-sky"/>
+  <text x="136" y="42" class="d-t sm b d-c">manifest row</text>
+  <text x="136" y="60" class="d-m xs d-c">| filename | title | category | … |</text>
+
+  <path d="M 260 46 L 300 46" class="d-arrow" marker-end="url(#m-ah)"/>
+
+  <path d="M 440 12 L 590 50 L 440 88 L 290 50 Z" class="d-amber"/>
+  <text x="440" y="46" class="d-t sm b d-c">any File with</text>
+  <text x="440" y="64" class="d-t sm b d-c">this filename?</text>
+
+  <path d="M 590 50 L 660 50 L 660 96" class="d-arrow" marker-end="url(#m-ah)"/>
+  <text x="628" y="42" class="d-m xs d-c">yes</text>
+  <rect x="530" y="98" width="316" height="72" rx="8" class="d-green"/>
+  <text x="688" y="122" class="d-t sm b d-c">use the existing filepath(s)</text>
+  <text x="688" y="141" class="d-m xs d-c">filenames are not unique across directories,</text>
+  <text x="688" y="156" class="d-m xs d-c">so a row may update several nodes</text>
+
+  <path d="M 440 90 L 440 132" class="d-arrow" marker-end="url(#m-ah)"/>
+  <text x="454" y="116" class="d-m xs">no</text>
+  <rect x="180" y="134" width="330" height="80" rx="8" class="d-violet"/>
+  <text x="345" y="158" class="d-t sm b d-c">create a catalogue node</text>
+  <text x="345" y="178" class="d-m mono d-c">{data_root}/{category}/{filename}</text>
+  <text x="345" y="198" class="d-m xs d-c">a synthetic path under /app/project_data</text>
+
+  <path d="M 345 216 L 345 244" class="d-arrow dash" marker-end="url(#m-ah)"/>
+  <rect x="120" y="246" width="450" height="58" rx="8" class="d-box"/>
+  <text x="345" y="270" class="d-t sm b d-c">later, when the real file is ingested…</text>
+  <text x="345" y="290" class="d-m xs d-c">ingest MERGEs on the same filepath, so chunks attach to this very node</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:239</a>. The synthetic root is
+  the container ingestion root, deliberately, so catalogue-only entries converge with real files
+  rather than forking into duplicates.
+</figcaption>
+</figure>
+
+<p>
+  A row's metadata write is a single transaction,
+  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:156</a>: MERGE the File, then
+  conditionally MERGE-and-link Category, Source (only if the cell starts with <code>http</code>),
+  Edition (unless it is an em dash), WhyItMatters, Validated, an Access level inferred from whether the
+  source cell mentions <em>login-gated</em>, and a Tranche derived from the manifest's own H1 heading
+  (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:92</a>).
+</p>
+
+<div class="note warn">
+  <strong>Two lists are maintained by hand</strong>
+  <p>
+    <code>SUPERSEDES_EDGES</code> (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:43</a>)
+    and <code>VARIANT_GROUPS</code> (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:53</a>)
+    encode supersession and duplication facts that live in the manifest <em>prose</em>, not in any
+    column — so they can't be parsed. When a document is superseded or a duplicate is spotted, edit
+    these lists. They are applied after all rows load, by
+    <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:301</a>; an edge naming a
+    filename with no File node is a silent no-op because the <code>MATCH</code> simply fails.
+  </p>
+</div>
+
+<h2>Stage 3 — enrichment</h2>
+
+<p>
+  Two passes over the graph, each skipping work already done
+  (<a class="ref" href="../../pipeline/enrich.py">enrich.py:189</a>).
+</p>
+
+<figure>
+<svg viewBox="0 0 880 400" role="img" aria-label="The two enrichment passes: material typing and chunk entity extraction">
+  <defs>
+    <marker id="e-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <!-- pass 1 -->
+  <text x="16" y="26" class="d-m b">PASS 1 — document material types</text>
+  <rect x="16" y="38" width="200" height="62" rx="8" class="d-box"/>
+  <text x="116" y="62" class="d-t sm b d-c">files with no IS_TYPE</text>
+  <text x="116" y="80" class="d-m mono d-c">FETCH_DOCS_WITHOUT_…</text>
+
+  <path d="M 220 69 L 254 69" class="d-arrow" marker-end="url(#e-ah)"/>
+  <rect x="258" y="38" width="220" height="62" rx="8" class="d-amber"/>
+  <text x="368" y="62" class="d-t sm b d-c">extract_material_type</text>
+  <text x="368" y="80" class="d-m xs d-c">filename + first chunk → LLM, format:json</text>
+
+  <path d="M 482 69 L 516 69" class="d-arrow" marker-end="url(#e-ah)"/>
+  <rect x="520" y="38" width="220" height="62" rx="8" class="d-green"/>
+  <text x="630" y="62" class="d-t sm b d-c">MERGE MaterialType</text>
+  <text x="630" y="80" class="d-m mono d-c">(:File)-[:IS_TYPE]-&gt;(:MaterialType)</text>
+
+  <text x="754" y="58" class="d-m xs">one of 10</text>
+  <text x="754" y="72" class="d-m xs">fixed labels,</text>
+  <text x="754" y="86" class="d-m xs">"Other" on failure</text>
+
+  <line x1="16" y1="128" x2="864" y2="128" class="d-line"/>
+
+  <!-- pass 2 -->
+  <text x="16" y="162" class="d-m b">PASS 2 — chunk entity extraction</text>
+  <rect x="16" y="174" width="200" height="62" rx="8" class="d-box"/>
+  <text x="116" y="198" class="d-t sm b d-c">chunks where</text>
+  <text x="116" y="216" class="d-m mono d-c">c.enriched IS NULL</text>
+
+  <path d="M 220 205 L 254 205" class="d-arrow" marker-end="url(#e-ah)"/>
+  <rect x="258" y="174" width="220" height="62" rx="8" class="d-amber"/>
+  <text x="368" y="198" class="d-t sm b d-c">extract_entities</text>
+  <text x="368" y="216" class="d-m xs d-c">first 3000 chars → LLM → JSON</text>
+
+  <path d="M 482 205 L 516 205" class="d-arrow" marker-end="url(#e-ah)"/>
+  <rect x="520" y="160" width="260" height="130" rx="8" class="d-green"/>
+  <text x="650" y="182" class="d-t sm b d-c">one transaction per chunk</text>
+  <text x="536" y="204" class="d-t sm mono">concepts → MENTIONS</text>
+  <text x="536" y="224" class="d-t sm mono">organizations → MENTIONS</text>
+  <text x="536" y="244" class="d-t sm mono">legal_references → CITES</text>
+  <text x="536" y="264" class="d-t sm mono">courses → File REFERENCES</text>
+  <text x="536" y="282" class="d-m xs mono">then SET c.enriched = true</text>
+
+  <rect x="16" y="316" width="848" height="66" rx="8" class="d-panel"/>
+  <text x="34" y="340" class="d-t sm b">Note the asymmetry</text>
+  <text x="34" y="360" class="d-t sm">Concepts, organisations and legal references hang off the <tspan class="d-t sm mono">Chunk</tspan> — that granularity is what makes graph-augmented retrieval work.</text>
+  <text x="34" y="376" class="d-t sm">Courses are attached to the parent <tspan class="d-t sm mono">File</tspan> instead, since a course reference describes the whole document.</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../pipeline/enrich.py">enrich.py:103</a> pass 1 ·
+  <a class="ref" href="../../pipeline/enrich.py">enrich.py:138</a> pass 2 ·
+  <a class="ref" href="../../pipeline/enrich.py">enrich.py:30</a> the per-chunk transaction.
+</figcaption>
+</figure>
+
+<h3>pipeline/extract.py is shared, not a stage</h3>
+
+<p>
+  <a class="ref" href="../../pipeline/extract.py">extract.py:75</a> is a library used by two very
+  different callers: <code>enrich.py</code> in batch, and <code>rag.py</code> once per user query. Both
+  hit the same prompt and the same defensive parser.
+</p>
+
+<ul>
+  <li>
+    The prompt (<a class="ref" href="../../pipeline/extract.py">extract.py:20</a>) demands raw JSON with
+    a fixed four-key schema, and calls are made with Ollama's <code>format: json</code> mode so the
+    model stops as soon as the object closes instead of padding with prose.
+  </li>
+  <li>
+    <code>_parse_json</code> (<a class="ref" href="../../pipeline/extract.py">extract.py:63</a>) still
+    strips markdown fences and regex-extracts the first <code>{…}</code>, because models lie about
+    output formats.
+  </li>
+  <li>
+    Every return path is defensive: on any exception, or any malformed field, the function returns
+    empty lists rather than raising. That is what lets the query-time caller treat graph traversal as
+    optional.
+  </li>
+</ul>
+
+<h2>Running the stages</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Stage</th><th>Container command</th><th>HTTP equivalent</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Ingest</td>
+      <td><code>docker exec -it em_b_v2-api-1 python -m pipeline.ingest</code></td>
+      <td><span class="tag post">POST</span> <code>/admin/ingest</code></td>
+    </tr>
+    <tr>
+      <td>Manifest</td>
+      <td><code>docker exec -it em_b_v2-api-1 python -m pipeline.load_manifest</code></td>
+      <td><span class="tag post">POST</span> <code>/admin/load-manifest</code></td>
+    </tr>
+    <tr>
+      <td>Enrich</td>
+      <td><code>docker exec -it em_b_v2-api-1 python -m pipeline.enrich</code></td>
+      <td>—</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Each module has an <code>if __name__ == "__main__"</code> block that builds its own Neo4j session and
+  closes the driver in a <code>finally</code>, which is what makes the <code>docker exec</code> form
+  work. The admin router
+  (<a class="ref" href="../../src/routers/admin.py">admin.py:66</a>) wraps the same functions with the
+  request-scoped session instead.
+</p>
+
+<div class="pagenav">
+  <a href="index.html">← Overview</a>
+  <a href="graph-schema.html">Next: The graph schema →</a>
+</div>
+
+</main>
+</body>
+</html>

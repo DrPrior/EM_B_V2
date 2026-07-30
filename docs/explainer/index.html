@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EM_B_Hybrid — Code Explainer</title>
+<link rel="stylesheet" href="explainer.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><a href="index.html">EM_B_Hybrid · Code Explainer</a></div>
+    <nav>
+      <a href="index.html" class="active">Overview</a>
+      <a href="pipeline.html">Pipeline</a>
+      <a href="rag.html">RAG&nbsp;query</a>
+      <a href="graph-schema.html">Graph</a>
+      <a href="api.html">API</a>
+      <a href="deployment.html">Deployment</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>What this application is</h1>
+<p class="lede">
+  A retrieval-augmented chatbot over a corpus of emergency-management documents. Source files are
+  chunked and embedded into a <strong>Neo4j</strong> knowledge graph; questions are answered by a
+  <strong>local LLM</strong> that is handed only the chunks the graph says are relevant. Nothing
+  leaves the machine — the models run natively on the host GPU, the database and API run in Docker.
+</p>
+
+<div class="note">
+  <strong>How to read this explainer</strong>
+  <p>
+    Every <a class="ref" href="../../src/services/rag.py">src/services/rag.py:111</a>-style chip is a
+    link to the real file in this repository, relative to these pages. The number after the colon is
+    the line where the thing being described starts. Open a page from the repo checkout
+    (<code>docs/explainer/index.html</code>) so the links resolve.
+  </p>
+</div>
+
+<h2>The whole system on one page</h2>
+
+<p>
+  Three processes cooperate. Two of them are containers declared in
+  <a class="ref" href="../../docker-compose.yml">docker-compose.yml</a>; the third, Ollama, deliberately
+  is <em>not</em> — it runs natively so it can drive the host GPU directly, which a container cannot do
+  portably across Metal, CUDA and Vulkan. That split is the "hybrid" in the project name.
+</p>
+
+<figure>
+<svg viewBox="0 0 900 430" role="img" aria-label="System architecture: browser, Docker containers for API and Neo4j, and host-native Ollama">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+    <marker id="ahs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head strong"/>
+    </marker>
+  </defs>
+
+  <!-- host -->
+  <rect x="14" y="14" width="872" height="400" rx="12" class="d-panel"/>
+  <text x="32" y="40" class="d-m b">HOST MACHINE — no network egress required at query time</text>
+
+  <!-- browser -->
+  <rect x="34" y="150" width="170" height="96" rx="8" class="d-sky"/>
+  <text x="119" y="184" class="d-t b d-c">Browser</text>
+  <text x="119" y="204" class="d-t sm d-c">chat UI, served by the API</text>
+  <text x="119" y="224" class="d-m mono d-c">src/static/index.html</text>
+
+  <!-- docker -->
+  <rect x="248" y="64" width="336" height="330" rx="10" class="d-panel"/>
+  <text x="266" y="88" class="d-m b">DOCKER</text>
+
+  <rect x="268" y="106" width="296" height="116" rx="8" class="d-accent"/>
+  <text x="416" y="134" class="d-t b d-c">api — FastAPI + uvicorn</text>
+  <text x="416" y="154" class="d-t sm d-c">routers · RAG service · pipelines</text>
+  <text x="416" y="174" class="d-m mono d-c">src/main.py  ·  port 8000</text>
+  <text x="416" y="196" class="d-m xs d-c" style="fill:var(--muted)">--reload: ./src and ./pipeline are bind-mounted</text>
+
+  <rect x="268" y="262" width="296" height="112" rx="8" class="d-green"/>
+  <text x="416" y="290" class="d-t b d-c">neo4j</text>
+  <text x="416" y="310" class="d-t sm d-c">graph + vector index (2560-dim, cosine)</text>
+  <text x="416" y="330" class="d-m mono d-c">bolt :7687  ·  browser :7474</text>
+  <text x="416" y="352" class="d-m xs d-c">named volume em_b_v2_neo4j_data</text>
+
+  <!-- ollama -->
+  <rect x="628" y="106" width="240" height="180" rx="8" class="d-amber"/>
+  <text x="748" y="134" class="d-t b d-c">Ollama — native on host</text>
+  <text x="748" y="154" class="d-m mono d-c">:11434  ·  GPU accelerated</text>
+  <rect x="648" y="172" width="200" height="44" rx="6" class="d-box"/>
+  <text x="748" y="190" class="d-t sm b d-c">chat-model</text>
+  <text x="748" y="207" class="d-m xs d-c">FROM gemma4:12b-it-qat · num_ctx 8192</text>
+  <rect x="648" y="226" width="200" height="44" rx="6" class="d-box"/>
+  <text x="748" y="244" class="d-t sm b d-c">embedding-model</text>
+  <text x="748" y="261" class="d-m xs d-c">FROM qwen3-embedding:4b · 2560-dim</text>
+
+  <!-- arrows -->
+  <path d="M 206 190 L 264 170" class="d-arrow strong" marker-end="url(#ahs)"/>
+  <text x="234" y="146" class="d-m d-c">HTTP</text>
+  <text x="234" y="160" class="d-m d-c">+ SSE</text>
+
+  <path d="M 416 224 L 416 258" class="d-arrow" marker-end="url(#ah)"/>
+  <text x="428" y="246" class="d-m mono">bolt://neo4j:7687</text>
+
+  <path d="M 566 158 L 624 158" class="d-arrow" marker-end="url(#ah)"/>
+  <text x="596" y="140" class="d-m d-c">HTTP</text>
+  <text x="596" y="182" class="d-m mono d-c" style="font-size:9.5px">host.docker.internal</text>
+</svg>
+<figcaption>
+  The API is the only component that talks to both stores. It reaches Neo4j over the compose network
+  and reaches Ollama by escaping the container to the host gateway — declared as
+  <code>extra_hosts: ["host.docker.internal:host-gateway"]</code> so the same file works on Linux.
+</figcaption>
+</figure>
+
+<h2>Two flows, and only two</h2>
+
+<p>
+  Almost every line of Python in this repo serves one of two jobs: <strong>building</strong> the graph
+  from documents (offline, run by hand or via <code>/admin</code>), or <strong>answering</strong> a
+  question from it (online, per request). Keeping them apart is the fastest way to orient yourself.
+</p>
+
+<figure>
+<svg viewBox="0 0 900 336" role="img" aria-label="Build-time pipeline versus query-time RAG flow">
+  <defs>
+    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <!-- lane A -->
+  <text x="16" y="26" class="d-m b">BUILD TIME — run once per corpus change</text>
+  <rect x="16" y="42" width="150" height="66" rx="8" class="d-box"/>
+  <text x="91" y="70" class="d-t sm b d-c">project_data/</text>
+  <text x="91" y="88" class="d-m xs d-c">pdf · docx · pptx · md · txt</text>
+
+  <rect x="200" y="42" width="150" height="66" rx="8" class="d-violet"/>
+  <text x="275" y="70" class="d-t sm b d-c">ingest.py</text>
+  <text x="275" y="88" class="d-m xs d-c">chunk + embed</text>
+
+  <rect x="384" y="42" width="150" height="66" rx="8" class="d-violet"/>
+  <text x="459" y="64" class="d-t sm b d-c">load_manifest.py</text>
+  <text x="459" y="82" class="d-m xs d-c">titles, categories,</text>
+  <text x="459" y="96" class="d-m xs d-c">supersession edges</text>
+
+  <rect x="568" y="42" width="150" height="66" rx="8" class="d-violet"/>
+  <text x="643" y="70" class="d-t sm b d-c">enrich.py</text>
+  <text x="643" y="88" class="d-m xs d-c">LLM entity extraction</text>
+
+  <rect x="752" y="42" width="132" height="66" rx="8" class="d-green"/>
+  <text x="818" y="70" class="d-t sm b d-c">Neo4j</text>
+  <text x="818" y="88" class="d-m xs d-c">knowledge graph</text>
+
+  <path d="M 168 75 L 196 75" class="d-arrow" marker-end="url(#ah2)"/>
+  <path d="M 352 75 L 380 75" class="d-arrow" marker-end="url(#ah2)"/>
+  <path d="M 536 75 L 564 75" class="d-arrow" marker-end="url(#ah2)"/>
+  <path d="M 720 75 L 748 75" class="d-arrow" marker-end="url(#ah2)"/>
+
+  <line x1="16" y1="140" x2="884" y2="140" class="d-line"/>
+
+  <!-- lane B -->
+  <text x="16" y="178" class="d-m b">QUERY TIME — every chat request</text>
+  <rect x="16" y="194" width="150" height="66" rx="8" class="d-sky"/>
+  <text x="91" y="222" class="d-t sm b d-c">question</text>
+  <text x="91" y="240" class="d-m xs d-c">POST /chat/stream</text>
+
+  <rect x="200" y="194" width="150" height="66" rx="8" class="d-accent"/>
+  <text x="275" y="216" class="d-t sm b d-c">embed + search</text>
+  <text x="275" y="234" class="d-m xs d-c">vector index, then</text>
+  <text x="275" y="248" class="d-m xs d-c">entity graph traversal</text>
+
+  <rect x="384" y="194" width="150" height="66" rx="8" class="d-accent"/>
+  <text x="459" y="216" class="d-t sm b d-c">merge + dedupe</text>
+  <text x="459" y="234" class="d-m xs d-c">score floors, supersession</text>
+  <text x="459" y="248" class="d-m xs d-c">annotations</text>
+
+  <rect x="568" y="194" width="150" height="66" rx="8" class="d-accent"/>
+  <text x="643" y="222" class="d-t sm b d-c">build prompt</text>
+  <text x="643" y="240" class="d-m xs d-c">system + history + context</text>
+
+  <rect x="752" y="194" width="132" height="66" rx="8" class="d-amber"/>
+  <text x="818" y="222" class="d-t sm b d-c">chat-model</text>
+  <text x="818" y="240" class="d-m xs d-c">streamed back</text>
+
+  <path d="M 168 227 L 196 227" class="d-arrow" marker-end="url(#ah2)"/>
+  <path d="M 352 227 L 380 227" class="d-arrow" marker-end="url(#ah2)"/>
+  <path d="M 536 227 L 564 227" class="d-arrow" marker-end="url(#ah2)"/>
+  <path d="M 720 227 L 748 227" class="d-arrow" marker-end="url(#ah2)"/>
+
+  <path d="M 818 194 L 818 130 L 460 130 L 460 118" class="d-arrow dash" marker-end="url(#ah2)"/>
+  <text x="640" y="122" class="d-m d-c">query-time retrieval reads what build time wrote</text>
+
+  <text x="16" y="308" class="d-m">Both lanes call the same two Ollama models; only the build lane writes to the graph.</text>
+</svg>
+<figcaption>
+  The build lane is idempotent at every stage — rerunning it skips work already done. The query lane
+  never writes: its Neo4j session is opened in <code>READ_ACCESS</code> mode so the server rejects an
+  accidental write (<a class="ref" href="../../src/routers/chat.py">src/routers/chat.py:100</a>).
+</figcaption>
+</figure>
+
+<h2>Where the code lives</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Path</th><th>Responsibility</th><th>Start reading at</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>src/main.py</code></td>
+      <td>App construction, lifespan startup/shutdown, router wiring, static UI mount</td>
+      <td><a class="ref" href="../../src/main.py">main.py:21</a></td>
+    </tr>
+    <tr>
+      <td><code>src/routers/</code></td>
+      <td>HTTP surface — <code>chat</code>, <code>graph</code>, <code>admin</code>, <code>files</code></td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:108</a></td>
+    </tr>
+    <tr>
+      <td><code>src/services/rag.py</code></td>
+      <td>The retrieval pipeline and prompt assembly — the heart of the app</td>
+      <td><a class="ref" href="../../src/services/rag.py">rag.py:111</a></td>
+    </tr>
+    <tr>
+      <td><code>src/services/llm.py</code>, <code>embeddings.py</code></td>
+      <td>Thin HTTP clients for Ollama's <code>/api/chat</code>, <code>/api/generate</code>, <code>/api/embeddings</code></td>
+      <td><a class="ref" href="../../src/services/llm.py">llm.py:48</a></td>
+    </tr>
+    <tr>
+      <td><code>src/services/session.py</code></td>
+      <td>In-memory, thread-safe conversation history keyed by UUID</td>
+      <td><a class="ref" href="../../src/services/session.py">session.py:22</a></td>
+    </tr>
+    <tr>
+      <td><code>src/services/ollama_bootstrap.py</code></td>
+      <td>Startup provisioning of the host models over Ollama's REST API</td>
+      <td><a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:264</a></td>
+    </tr>
+    <tr>
+      <td><code>src/database/schema.py</code></td>
+      <td>Every Cypher string in the app, as module-level constants</td>
+      <td><a class="ref" href="../../src/database/schema.py">schema.py:326</a></td>
+    </tr>
+    <tr>
+      <td><code>src/database/connection.py</code></td>
+      <td>Singleton driver, per-request session dependency</td>
+      <td><a class="ref" href="../../src/database/connection.py">connection.py:20</a></td>
+    </tr>
+    <tr>
+      <td><code>src/core/</code></td>
+      <td>Settings, per-IP rate limiting, timing instrumentation</td>
+      <td><a class="ref" href="../../src/core/config.py">config.py:5</a></td>
+    </tr>
+    <tr>
+      <td><code>pipeline/</code></td>
+      <td>The three build-time stages plus the shared LLM extraction library</td>
+      <td><a class="ref" href="../../pipeline/ingest.py">ingest.py:425</a></td>
+    </tr>
+    <tr>
+      <td><code>src/static/</code></td>
+      <td>Vanilla-JS chat UI: SSE reader, markdown render, citation linkifier</td>
+      <td><a class="ref" href="../../src/static/app.js">app.js:121</a></td>
+    </tr>
+    <tr>
+      <td><code>electron/</code></td>
+      <td>Desktop wrapper: setup wizard, dependency install, stack supervisor</td>
+      <td><a class="ref" href="../../electron/main.js">main.js:102</a></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Design decisions worth knowing up front</h2>
+
+<div class="grid">
+  <div class="card">
+    <h4>Cypher is never interpolated</h4>
+    <p>
+      All queries live as constants in <code>schema.py</code> or as module-level strings, and every
+      value arrives through a <code>$param</code> placeholder. There is even a heuristic guard,
+      <a class="ref" href="../../src/database/connection.py">connection.py:206</a>, that rejects
+      query strings containing interpolation markers.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Superseded documents stay retrievable</h4>
+    <p>
+      Rather than filtering old editions out, retrieval attaches a <code>superseded_by</code> label,
+      the context line is annotated <em>SUPERSEDED … (historical reference)</em>, and the system prompt
+      tells the model to prefer the current version. History stays citable.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Graph traversal is additive, never fatal</h4>
+    <p>
+      The entity-extraction and graph-query block is wrapped in a bare <code>except: pass</code>
+      (<a class="ref" href="../../src/services/rag.py">rag.py:165</a>). If the LLM hiccups mid-query,
+      the answer degrades to vector-only results instead of failing.
+    </p>
+  </div>
+  <div class="card">
+    <h4>User text is fenced as data</h4>
+    <p>
+      The question is wrapped in <code>[USER_INPUT_START] … [USER_INPUT_END]</code> and the system
+      prompt instructs the model to treat everything inside — and all retrieved context — as data,
+      never as instructions. A prompt-injection mitigation, not a guarantee.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Everything build-time is idempotent</h4>
+    <p>
+      Ingestion skips fully-embedded files, manifest loading is all <code>MERGE</code>, enrichment
+      skips <code>c.enriched = true</code> chunks and already-typed documents. Rerun any stage safely.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Fail fast on a missing Ollama</h4>
+    <p>
+      The lifespan raises and the container exits if the host daemon can't be reached
+      (<a class="ref" href="../../src/main.py">main.py:59</a>). A running API with no usable LLM would
+      only serve broken chat.
+    </p>
+  </div>
+</div>
+
+<h2>Suggested reading order</h2>
+
+<ol class="steps">
+  <li>
+    <strong><a href="pipeline.html">The build pipeline</a></strong>
+    How raw documents become chunks, embeddings, metadata and entities. Read this first — the query
+    side only makes sense once you know what is in the graph.
+  </li>
+  <li>
+    <strong><a href="graph-schema.html">The graph schema</a></strong>
+    Every node label and edge type, colour-coded by which stage creates it.
+  </li>
+  <li>
+    <strong><a href="rag.html">The RAG query path</a></strong>
+    A single question traced end to end, from the browser's <code>fetch</code> to the last SSE token.
+  </li>
+  <li>
+    <strong><a href="api.html">API surface and cross-cutting concerns</a></strong>
+    Routers, response models, sessions, rate limiting, timing logs.
+  </li>
+  <li>
+    <strong><a href="deployment.html">Deployment</a></strong>
+    Startup sequence, the hybrid Ollama bootstrap, and the Electron desktop wizard.
+  </li>
+</ol>
+
+<div class="pagenav">
+  <span></span>
+  <a href="pipeline.html">Next: The build pipeline →</a>
+</div>
+
+</main>
+</body>
+</html>

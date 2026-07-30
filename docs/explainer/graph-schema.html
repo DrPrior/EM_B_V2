@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The graph schema — EM_B_Hybrid</title>
+<link rel="stylesheet" href="explainer.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><a href="index.html">EM_B_Hybrid · Code Explainer</a></div>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="pipeline.html">Pipeline</a>
+      <a href="rag.html">RAG&nbsp;query</a>
+      <a href="graph-schema.html" class="active">Graph</a>
+      <a href="api.html">API</a>
+      <a href="deployment.html">Deployment</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>The graph schema</h1>
+<p class="lede">
+  A filesystem spine — Directory, File, Chunk — with two independent metadata layers bolted onto it:
+  catalogue facts from the manifest, and semantic entities from the LLM. Every Cypher statement that
+  builds it lives in <a class="ref" href="../../src/database/schema.py">src/database/schema.py</a>.
+</p>
+
+<h2>The whole schema</h2>
+
+<figure>
+<svg viewBox="0 0 900 560" role="img" aria-label="Graph schema: Directory, File and Chunk spine with manifest and enrichment metadata layers">
+  <defs>
+    <marker id="g-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+    <marker id="g-ahs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head strong"/>
+    </marker>
+  </defs>
+
+  <!-- ── spine ── -->
+  <rect x="368" y="30" width="164" height="52" rx="8" class="d-green"/>
+  <text x="450" y="52" class="d-t b d-c">Directory</text>
+  <text x="450" y="70" class="d-m mono d-c">.path (unique) .name</text>
+
+  <path d="M 532 44 C 590 26, 590 76, 534 66" class="d-arrow" marker-end="url(#g-ah)"/>
+  <text x="600" y="52" class="d-m mono">CONTAINS_DIR</text>
+
+  <path d="M 450 84 L 450 128" class="d-arrow strong" marker-end="url(#g-ahs)"/>
+  <text x="462" y="110" class="d-m mono">CONTAINS_FILE</text>
+
+  <rect x="348" y="130" width="204" height="66" rx="8" class="d-green"/>
+  <text x="450" y="154" class="d-t b d-c">File</text>
+  <text x="450" y="172" class="d-m mono d-c">.filepath (unique)</text>
+  <text x="450" y="188" class="d-m mono d-c">.filename .title .extension</text>
+
+  <path d="M 450 198 L 450 336" class="d-arrow strong" marker-end="url(#g-ahs)"/>
+  <text x="462" y="272" class="d-m mono">HAS_CHUNK</text>
+
+  <rect x="358" y="338" width="184" height="70" rx="8" class="d-green"/>
+  <text x="450" y="362" class="d-t b d-c">Chunk</text>
+  <text x="450" y="380" class="d-m mono d-c">.chunk_id .text .sequence</text>
+  <text x="450" y="398" class="d-m mono d-c">.embedding[2560] .enriched</text>
+
+  <!-- ── manifest panel ── -->
+  <rect x="14" y="118" width="266" height="330" rx="10" class="d-panel"/>
+  <text x="30" y="140" class="d-m b">CATALOGUE LAYER — load_manifest.py</text>
+
+  <g class="d-sky">
+    <rect x="28" y="152" width="238" height="36" rx="6"/>
+    <rect x="28" y="194" width="238" height="36" rx="6"/>
+    <rect x="28" y="236" width="238" height="36" rx="6"/>
+    <rect x="28" y="278" width="238" height="36" rx="6"/>
+    <rect x="28" y="320" width="238" height="36" rx="6"/>
+    <rect x="28" y="362" width="238" height="36" rx="6"/>
+    <rect x="28" y="404" width="238" height="36" rx="6"/>
+  </g>
+  <text x="42" y="169" class="d-t sm b">Category</text>
+  <text x="42" y="183" class="d-m mono">← :IN_CATEGORY</text>
+  <text x="42" y="211" class="d-t sm b">Source</text>
+  <text x="42" y="225" class="d-m mono">← :HAS_SOURCE  .url</text>
+  <text x="42" y="253" class="d-t sm b">Edition</text>
+  <text x="42" y="267" class="d-m mono">← :HAS_EDITION  .value</text>
+  <text x="42" y="295" class="d-t sm b">WhyItMatters</text>
+  <text x="42" y="309" class="d-m mono">← :EXPLAINS</text>
+  <text x="42" y="337" class="d-t sm b">Validated</text>
+  <text x="42" y="351" class="d-m mono">← :HAS_VALIDATION</text>
+  <text x="42" y="379" class="d-t sm b">Tranche</text>
+  <text x="42" y="393" class="d-m mono">← :FROM_TRANCHE</text>
+  <text x="42" y="421" class="d-t sm b">Access</text>
+  <text x="42" y="435" class="d-m mono">← :HAS_ACCESS  .level</text>
+
+  <path d="M 344 164 L 286 200" class="d-arrow" marker-end="url(#g-ah)"/>
+  <text x="300" y="158" class="d-m e xs">File →</text>
+
+  <!-- ── enrichment panel ── -->
+  <rect x="620" y="118" width="266" height="330" rx="10" class="d-panel"/>
+  <text x="636" y="140" class="d-m b">SEMANTIC LAYER — enrich.py</text>
+
+  <g class="d-amber">
+    <rect x="634" y="152" width="238" height="36" rx="6"/>
+    <rect x="634" y="194" width="238" height="36" rx="6"/>
+    <rect x="634" y="248" width="238" height="36" rx="6"/>
+    <rect x="634" y="290" width="238" height="36" rx="6"/>
+    <rect x="634" y="332" width="238" height="36" rx="6"/>
+  </g>
+  <text x="648" y="169" class="d-t sm b">MaterialType</text>
+  <text x="648" y="183" class="d-m mono">← File :IS_TYPE</text>
+  <text x="648" y="211" class="d-t sm b">Course</text>
+  <text x="648" y="225" class="d-m mono">← File :REFERENCES</text>
+  <text x="648" y="265" class="d-t sm b">Concept</text>
+  <text x="648" y="279" class="d-m mono">← Chunk :MENTIONS</text>
+  <text x="648" y="307" class="d-t sm b">Organization</text>
+  <text x="648" y="321" class="d-m mono">← Chunk :MENTIONS</text>
+  <text x="648" y="349" class="d-t sm b">LegalReference</text>
+  <text x="648" y="363" class="d-m mono">← Chunk :CITES</text>
+
+  <text x="648" y="392" class="d-m xs">Plus one cross-layer edge:</text>
+  <text x="648" y="408" class="d-m mono">WhyItMatters -[:RELATES_TO]-&gt; Concept</text>
+  <text x="648" y="430" class="d-m xs">Chunk-level entities are what make</text>
+  <text x="648" y="444" class="d-m xs">graph-augmented retrieval possible.</text>
+
+  <path d="M 556 164 L 614 190" class="d-arrow" marker-end="url(#g-ah)"/>
+  <text x="600" y="158" class="d-m xs">← File</text>
+  <path d="M 546 366 C 590 358, 600 330, 614 300" class="d-arrow" marker-end="url(#g-ah)"/>
+  <text x="566" y="392" class="d-m xs">Chunk →</text>
+
+  <!-- footer -->
+  <rect x="14" y="470" width="872" height="70" rx="9" class="d-box"/>
+  <text x="34" y="494" class="d-t sm b">Naming note</text>
+  <text x="34" y="514" class="d-t sm">The <tspan class="d-t sm mono">File</tspan> label was formerly <tspan class="d-t sm mono">Document</tspan>. Some docstrings and variable names in the pipeline still say "document" —</text>
+  <text x="34" y="530" class="d-t sm">e.g. <tspan class="d-t sm mono">LINK_DOC_COURSE</tspan>, <tspan class="d-t sm mono">doc.filepath</tspan> — but they all bind to <tspan class="d-t sm mono">:File</tspan>.</text>
+</svg>
+<figcaption>
+  Every relationship in this diagram is created by a named constant in
+  <a class="ref" href="../../src/database/schema.py">schema.py:211</a> onwards — one <code>MERGE_*</code>
+  per node label and one <code>LINK_*</code> per edge.
+</figcaption>
+</figure>
+
+<h2>Curated file-to-file edges</h2>
+
+<p>
+  Two edges connect Files to each other. Neither can be derived from the manifest table columns; both
+  are hand-maintained lists in <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:43</a>.
+</p>
+
+<figure>
+<svg viewBox="0 0 860 250" role="img" aria-label="SUPERSEDES and VARIANT_OF edges between File nodes">
+  <defs>
+    <marker id="s-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <text x="16" y="26" class="d-m b">SUPERSEDES — a newer edition replaces an older one</text>
+  <rect x="16" y="38" width="200" height="52" rx="8" class="d-green"/>
+  <text x="116" y="60" class="d-t sm b d-c">CPG-101_EOP_Guide</text>
+  <text x="116" y="78" class="d-m xs d-c">2025 edition · current</text>
+  <path d="M 220 64 L 300 64" class="d-arrow" marker-end="url(#s-ah)"/>
+  <text x="260" y="54" class="d-m mono d-c">SUPERSEDES</text>
+  <rect x="304" y="38" width="200" height="52" rx="8" class="d-amber"/>
+  <text x="404" y="60" class="d-t sm b d-c">CPG_101_V2_30NOV2010</text>
+  <text x="404" y="78" class="d-m xs d-c">still indexed, still citable</text>
+
+  <path d="M 508 64 L 560 64" class="d-arrow dash" marker-end="url(#s-ah)"/>
+  <rect x="564" y="30" width="284" height="68" rx="8" class="d-box"/>
+  <text x="580" y="52" class="d-t sm b">At query time</text>
+  <text x="580" y="70" class="d-m xs">retrieval attaches superseded_by to the source and</text>
+  <text x="580" y="85" class="d-m xs">labels the context "SUPERSEDED by … (historical)"</text>
+
+  <line x1="16" y1="122" x2="844" y2="122" class="d-line"/>
+
+  <text x="16" y="156" class="d-m b">VARIANT_OF — a duplicate points at the canonical copy</text>
+  <rect x="16" y="168" width="200" height="52" rx="8" class="d-box"/>
+  <text x="116" y="190" class="d-t sm b d-c">fema_ccds-all-sheets</text>
+  <text x="116" y="208" class="d-m xs d-c">duplicate</text>
+  <path d="M 220 194 L 300 194" class="d-arrow" marker-end="url(#s-ah)"/>
+  <text x="260" y="184" class="d-m mono d-c">VARIANT_OF</text>
+  <rect x="304" y="168" width="240" height="52" rx="8" class="d-green"/>
+  <text x="424" y="190" class="d-t sm b d-c">FEMA CCDS (updated 8.22)</text>
+  <text x="424" y="208" class="d-m xs d-c">canonical · most current</text>
+
+  <rect x="564" y="160" width="284" height="68" rx="8" class="d-box"/>
+  <text x="580" y="182" class="d-t sm b">Advisory only</text>
+  <text x="580" y="200" class="d-m xs">Nothing in the retrieval path reads VARIANT_OF today —</text>
+  <text x="580" y="215" class="d-m xs">it exists to support deduplication decisions.</text>
+</svg>
+<figcaption>
+  Applied by <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:301</a> using
+  <a class="ref" href="../../src/database/schema.py">schema.py:287</a>. The retrieval queries in
+  <a class="ref" href="../../src/services/rag.py">rag.py:69</a> look up <code>SUPERSEDES</code> on every
+  hit.
+</figcaption>
+</figure>
+
+<h2>Constraints and indexes</h2>
+
+<p>
+  <a class="ref" href="../../src/database/schema.py">schema.py:326</a> runs on every app start from the
+  lifespan. All statements are <code>IF NOT EXISTS</code>, so startup is cheap after the first run —
+  with one deliberate exception.
+</p>
+
+<div class="note gotcha">
+  <strong>The vector index is dropped and rebuilt on every startup</strong>
+  <p>
+    <code>setup_constraints</code> issues <code>DROP INDEX chunk_vector_idx IF EXISTS</code> before
+    recreating it (<a class="ref" href="../../src/database/schema.py">schema.py:348</a>). This makes a
+    dimension change take effect without manual intervention, but it also means the index is rebuilt
+    from scratch on each restart — including every hot-reload triggered by saving a Python file.
+    Worth knowing when a large graph feels slow to warm up.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Kind</th><th>Target</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Unique constraint</td><td><code>Directory.path</code></td><td>Directory identity is its full path</td></tr>
+    <tr><td>Unique constraint</td><td><code>File.filepath</code></td><td>Filename alone collides across directories — the whole hybrid manifest resolution depends on this key</td></tr>
+    <tr><td>Unique constraint</td><td><code>Organization.name</code>, <code>Concept.name</code>, <code>LegalReference.name</code>, <code>Course.name</code>, <code>MaterialType.name</code></td><td>Entity nodes are shared across chunks; MERGE must converge</td></tr>
+    <tr><td>Unique constraint</td><td><code>WhyItMatters.name</code>, <code>Source.url</code>, <code>Edition.value</code>, <code>Validated.name</code>, <code>Category.name</code>, <code>Tranche.name</code>, <code>Access.level</code></td><td>Same, for the catalogue layer</td></tr>
+    <tr><td>Index</td><td><code>Chunk.sequence_number</code></td><td>Fast ordering of chunks within a file</td></tr>
+    <tr><td>Vector index</td><td><code>Chunk.embedding</code> — <code>chunk_vector_idx</code></td><td>2560 dimensions, cosine similarity; must match <code>qwen3-embedding:4b</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Reading the graph by hand</h2>
+
+<p>
+  Neo4j Browser is at <code>http://localhost:7474</code>. A few queries that pay off when debugging
+  retrieval:
+</p>
+
+<pre><code>// What did enrichment attach to a given document?
+MATCH (f:File {filename: 'CPG-101_EOP_Guide_2025.pdf'})-[:HAS_CHUNK]->(c)-[r]->(e)
+RETURN type(r), labels(e), e.name, count(*) ORDER BY count(*) DESC
+
+// Which chunks are still unenriched?
+MATCH (c:Chunk) WHERE c.enriched IS NULL RETURN count(c)
+
+// Which files came from the manifest but were never ingested?
+MATCH (f:File) WHERE NOT (f)-[:HAS_CHUNK]->() RETURN f.filepath ORDER BY f.filepath
+
+// Reset chunks before a full re-ingest (keeps Directory, File and entity nodes)
+MATCH (c:Chunk) DETACH DELETE c</code></pre>
+
+<p>
+  The API exposes read-only equivalents too — <code>/graph/search?q=…</code> for a text sweep across
+  node properties and <code>POST /graph/search</code> for a vector search. See the
+  <a href="api.html">API page</a>.
+</p>
+
+<div class="pagenav">
+  <a href="pipeline.html">← The build pipeline</a>
+  <a href="rag.html">Next: The RAG query path →</a>
+</div>
+
+</main>
+</body>
+</html>

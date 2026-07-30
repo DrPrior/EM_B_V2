@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment — EM_B_Hybrid</title>
+<link rel="stylesheet" href="explainer.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><a href="index.html">EM_B_Hybrid · Code Explainer</a></div>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="pipeline.html">Pipeline</a>
+      <a href="rag.html">RAG&nbsp;query</a>
+      <a href="graph-schema.html">Graph</a>
+      <a href="api.html">API</a>
+      <a href="deployment.html" class="active">Deployment</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>Deployment</h1>
+<p class="lede">
+  Why Ollama lives outside Docker, what happens in the first two seconds of app startup, and how the
+  Electron wrapper turns all of it into a double-click for someone who has never heard of a container.
+</p>
+
+<h2>The hybrid split</h2>
+
+<p>
+  Ollama used to be a third compose service. It was moved to the host because a containerised Ollama
+  cannot portably reach the GPU: CUDA passthrough needs the NVIDIA container toolkit, Metal is
+  unavailable to Linux containers entirely, and Intel Arc / Vulkan needs device mappings that differ per
+  machine. A host-native install gets whatever accelerator the machine has, for free.
+</p>
+
+<p>
+  The cost of that decision is that the model-provisioning logic which used to live in an entrypoint
+  script inside the Ollama container now has to be driven remotely, over HTTP, by the API. That is what
+  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py</a> is.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Concern</th><th>Where it lives</th><th>Consequence</th></tr></thead>
+  <tbody>
+    <tr><td>Neo4j</td><td>Container, named volume <code>em_b_v2_neo4j_data</code></td><td>Graph survives <code>compose down</code>; image is pinned so exported snapshots load elsewhere</td></tr>
+    <tr><td>API</td><td>Container, <code>--reload</code>, source bind-mounted</td><td>Save a <code>.py</code> and it restarts in seconds</td></tr>
+    <tr><td>Ollama</td><td>Host, native install</td><td>Not in <code>depends_on</code>; the app waits for it in code instead</td></tr>
+    <tr><td>Model definitions</td><td><code>Modelfile</code> / <code>Modelfile.embeddings</code></td><td>Both COPYed into the image <em>and</em> bind-mounted, so edits apply without a rebuild</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <strong>The one-time host setup</strong>
+  <p>
+    Ollama must be started with <code>OLLAMA_HOST=0.0.0.0</code>, otherwise it binds to loopback only and
+    the container's requests to <code>host.docker.internal:11434</code> are refused. Full instructions
+    are in <a class="ref" href="../../docs/HYBRID_SETUP.md">docs/HYBRID_SETUP.md</a>. Note the security
+    trade-off: <code>0.0.0.0</code> exposes the daemon to the local network, which is why
+    <a class="ref" href="../../scripts/harden-ollama-firewall.ps1">scripts/harden-ollama-firewall.ps1</a>
+    exists.
+  </p>
+</div>
+
+<h2>Startup: the lifespan</h2>
+
+<figure>
+<svg viewBox="0 0 880 470" role="img" aria-label="Application startup sequence inside the FastAPI lifespan">
+  <defs>
+    <marker id="d-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <rect x="250" y="16" width="300" height="46" rx="8" class="d-sky"/>
+  <text x="400" y="44" class="d-t sm b d-c">uvicorn starts · lifespan enters</text>
+  <path d="M 400 64 L 400 86" class="d-arrow" marker-end="url(#d-ah)"/>
+
+  <rect x="250" y="88" width="300" height="58" rx="8" class="d-green"/>
+  <text x="400" y="110" class="d-t sm b d-c">Neo4jConnection.get_instance()</text>
+  <text x="400" y="128" class="d-m xs d-c">reads NEO4J_AUTH + DB_URI, verifies connectivity</text>
+  <text x="400" y="142" class="d-m xs d-c">ValueError if either is missing → container exits</text>
+  <path d="M 400 148 L 400 170" class="d-arrow" marker-end="url(#d-ah)"/>
+
+  <rect x="250" y="172" width="300" height="58" rx="8" class="d-green"/>
+  <text x="400" y="194" class="d-t sm b d-c">setup_constraints(driver)</text>
+  <text x="400" y="212" class="d-m xs d-c">15 constraints/indexes, all IF NOT EXISTS</text>
+  <text x="400" y="226" class="d-m xs d-c">…then DROP + CREATE the vector index unconditionally</text>
+  <path d="M 400 232 L 400 254" class="d-arrow" marker-end="url(#d-ah)"/>
+
+  <rect x="250" y="256" width="300" height="58" rx="8" class="d-amber"/>
+  <text x="400" y="278" class="d-t sm b d-c">bootstrap()</text>
+  <text x="400" y="296" class="d-m xs d-c">wait_for_ollama() then ensure_models()</text>
+  <text x="400" y="310" class="d-m xs d-c">see the decision flow below</text>
+
+  <path d="M 554 285 L 640 285" class="d-arrow" marker-end="url(#d-ah)"/>
+  <rect x="644" y="256" width="220" height="58" rx="8" class="d-rose"/>
+  <text x="754" y="280" class="d-t sm b d-c">OllamaUnavailableError</text>
+  <text x="754" y="298" class="d-m xs d-c">re-raised — the app refuses to serve</text>
+
+  <path d="M 400 316 L 400 338" class="d-arrow" marker-end="url(#d-ah)"/>
+  <rect x="250" y="340" width="300" height="46" rx="8" class="d-accent"/>
+  <text x="400" y="368" class="d-t sm b d-c">yield — the app serves requests</text>
+
+  <path d="M 400 388 L 400 410" class="d-arrow" marker-end="url(#d-ah)"/>
+  <rect x="250" y="412" width="300" height="46" rx="8" class="d-box"/>
+  <text x="400" y="432" class="d-t sm b d-c">shutdown: connection.close()</text>
+  <text x="400" y="450" class="d-m xs d-c">RuntimeError on double-close is downgraded to a warning</text>
+
+  <rect x="16" y="88" width="216" height="226" rx="9" class="d-panel"/>
+  <text x="32" y="112" class="d-m b">FAIL FAST, NOT DEGRADE</text>
+  <text x="32" y="136" class="d-m xs">Every branch of startup either</text>
+  <text x="32" y="151" class="d-m xs">succeeds or raises. A half-started</text>
+  <text x="32" y="166" class="d-m xs">app — connected to Neo4j but with</text>
+  <text x="32" y="181" class="d-m xs">no reachable LLM — would accept</text>
+  <text x="32" y="196" class="d-m xs">chat requests and fail every one.</text>
+  <text x="32" y="226" class="d-m xs">Hot reload re-runs all of this, but</text>
+  <text x="32" y="241" class="d-m xs">the warm path is a single</text>
+  <text x="32" y="256" class="d-m xs mono">GET /api/tags</text>
+  <text x="32" y="286" class="d-m xs">Routers are registered before the</text>
+  <text x="32" y="301" class="d-m xs">static mount so "/" cannot shadow them.</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../src/main.py">main.py:21</a>. Startup and teardown are a single
+  <code>@asynccontextmanager</code> — no <code>@app.on_event</code> anywhere in the codebase.
+</figcaption>
+</figure>
+
+<h2>Provisioning the host models</h2>
+
+<figure>
+<svg viewBox="0 0 880 430" role="img" aria-label="ensure_models decision flow for each model variant">
+  <defs>
+    <marker id="b-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <rect x="290" y="14" width="300" height="52" rx="8" class="d-sky"/>
+  <text x="440" y="38" class="d-t sm b d-c">GET /api/tags — one read</text>
+  <text x="440" y="56" class="d-m xs d-c">the set of model names already on the host</text>
+  <path d="M 440 68 L 440 90" class="d-arrow" marker-end="url(#b-ah)"/>
+
+  <rect x="180" y="92" width="520" height="278" rx="10" class="d-panel"/>
+  <text x="198" y="114" class="d-m b">FOR EACH VARIANT — chat-model, embedding-model</text>
+
+  <path d="M 440 128 L 590 166 L 440 204 L 290 166 Z" class="d-amber"/>
+  <text x="440" y="162" class="d-t sm b d-c">variant present?</text>
+  <text x="440" y="180" class="d-m xs d-c">name or name:latest</text>
+
+  <path d="M 590 166 L 700 166" class="d-arrow" marker-end="url(#b-ah)"/>
+  <text x="644" y="158" class="d-m xs d-c">yes</text>
+  <rect x="704" y="142" width="164" height="48" rx="8" class="d-green"/>
+  <text x="786" y="164" class="d-t sm b d-c">skip</text>
+  <text x="786" y="181" class="d-m xs d-c">warm path ends here</text>
+
+  <path d="M 440 206 L 440 228" class="d-arrow" marker-end="url(#b-ah)"/>
+  <text x="454" y="222" class="d-m xs">no</text>
+
+  <path d="M 440 230 L 580 264 L 440 298 L 300 264 Z" class="d-amber"/>
+  <text x="440" y="262" class="d-t sm b d-c">base model present?</text>
+  <text x="440" y="280" class="d-m xs d-c">e.g. gemma4:12b-it-qat</text>
+
+  <path d="M 300 264 L 214 264" class="d-arrow" marker-end="url(#b-ah)"/>
+  <text x="256" y="256" class="d-m xs d-c">no</text>
+  <rect x="24" y="240" width="186" height="52" rx="8" class="d-rose"/>
+  <text x="117" y="262" class="d-t sm b d-c">POST /api/pull</text>
+  <text x="117" y="280" class="d-m xs d-c">blocking, up to 30 min</text>
+  <path d="M 117 294 L 117 324 L 436 324" class="d-arrow" marker-end="url(#b-ah)"/>
+
+  <path d="M 440 300 L 440 324" class="d-arrow" marker-end="url(#b-ah)"/>
+  <text x="454" y="318" class="d-m xs">yes</text>
+
+  <rect x="290" y="326" width="300" height="36" rx="8" class="d-violet"/>
+  <text x="440" y="350" class="d-t sm b d-c">POST /api/create — build the variant</text>
+
+  <rect x="16" y="384" width="848" height="40" rx="8" class="d-box"/>
+  <text x="34" y="409" class="d-t sm">The base model is passed explicitly as <tspan class="d-t sm mono">from</tspan>, never read from the Modelfile's FROM line — so what gets pulled and what the variant is built on can never drift apart.</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:248</a>. Idempotent by
+  construction: on a warm host it is one HTTP GET and two set lookups.
+</figcaption>
+</figure>
+
+<h3>Why the Modelfile gets parsed instead of sent</h3>
+
+<p>
+  <code>ollama create -f Modelfile</code> is not available here for two reasons: the host daemon cannot
+  read a file that lives inside the API container, and modern <code>/api/create</code> no longer accepts
+  a raw Modelfile string. So
+  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:159</a> parses the
+  file itself, extracting the <code>SYSTEM</code> block — including the triple-quoted multi-line form,
+  handled by <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:201</a> —
+  and every <code>PARAMETER</code> line into a typed dict, then posts them as structured JSON.
+  <code>FROM</code>, <code>TEMPLATE</code> and everything else are ignored.
+</p>
+
+<p>
+  Parameter values are coerced to <code>int</code>, then <code>float</code>, then left as a string
+  (<a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:146</a>), and a
+  repeated key accumulates into a list — matching how Ollama itself treats repeated directives such as
+  <code>stop</code>.
+</p>
+
+<div class="note">
+  <strong>Re-provisioning without a restart</strong>
+  <p>
+    <code>POST /admin/bootstrap-models</code>
+    (<a class="ref" href="../../src/routers/admin.py">admin.py:112</a>) calls the same two functions the
+    lifespan does, returning 503 rather than killing the process if the daemon is down. Use it after
+    editing a Modelfile — though note the variant must be deleted on the host first, since an existing
+    variant is skipped.
+  </p>
+</div>
+
+<h2>The Electron desktop app</h2>
+
+<p>
+  <code>electron/</code> wraps everything above for non-technical users. A single window opens as a
+  setup wizard and navigates to <code>http://127.0.0.1:8000</code> once the backend reports healthy
+  (<a class="ref" href="../../electron/main.js">main.js:63</a>). Heavy assets — the API image tar, a
+  pre-built graph snapshot, and the document corpus — are delivered on a USB drive rather than
+  downloaded.
+</p>
+
+<figure>
+<svg viewBox="0 0 880 520" role="img" aria-label="Electron first-run wizard steps and the subsequent-launch fast path">
+  <defs>
+    <marker id="w-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="d-head"/>
+    </marker>
+  </defs>
+
+  <text x="16" y="26" class="d-m b">FIRST RUN — runFirstRun(), every step re-checks whether its work is already done</text>
+
+  <g>
+    <rect x="16" y="40" width="200" height="52" rx="8" class="d-box"/>
+    <text x="116" y="62" class="d-t sm b d-c">1 · gpu</text>
+    <text x="116" y="80" class="d-m xs d-c">detect accelerator (informational)</text>
+
+    <rect x="240" y="40" width="200" height="52" rx="8" class="d-violet"/>
+    <text x="340" y="62" class="d-t sm b d-c">2 · docker</text>
+    <text x="340" y="80" class="d-m xs d-c">install Desktop if missing, await daemon</text>
+
+    <rect x="464" y="40" width="200" height="52" rx="8" class="d-violet"/>
+    <text x="564" y="62" class="d-t sm b d-c">3 · ollama</text>
+    <text x="564" y="80" class="d-m xs d-c">install, then persist host env vars</text>
+
+    <rect x="688" y="40" width="176" height="52" rx="8" class="d-rose"/>
+    <text x="776" y="62" class="d-t sm b d-c">4 · models</text>
+    <text x="776" y="80" class="d-m xs d-c">~10 GB, from the internet</text>
+  </g>
+
+  <path d="M 220 66 L 236 66" class="d-arrow" marker-end="url(#w-ah)"/>
+  <path d="M 444 66 L 460 66" class="d-arrow" marker-end="url(#w-ah)"/>
+  <path d="M 668 66 L 684 66" class="d-arrow" marker-end="url(#w-ah)"/>
+  <path d="M 776 96 L 776 118 L 116 118 L 116 140" class="d-arrow" marker-end="url(#w-ah)"/>
+
+  <g>
+    <rect x="16" y="142" width="200" height="52" rx="8" class="d-green"/>
+    <text x="116" y="164" class="d-t sm b d-c">5 · image</text>
+    <text x="116" y="182" class="d-m xs d-c">verify sha256, docker load from USB</text>
+
+    <rect x="240" y="142" width="200" height="52" rx="8" class="d-green"/>
+    <text x="340" y="164" class="d-t sm b d-c">6 · data</text>
+    <text x="340" y="182" class="d-m xs d-c">extract corpus tar.gz to userData</text>
+
+    <rect x="464" y="142" width="200" height="52" rx="8" class="d-green"/>
+    <text x="564" y="164" class="d-t sm b d-c">7 · snapshot</text>
+    <text x="564" y="182" class="d-m xs d-c">import the pre-built graph dump</text>
+
+    <rect x="688" y="142" width="176" height="52" rx="8" class="d-accent"/>
+    <text x="776" y="164" class="d-t sm b d-c">8 · start</text>
+    <text x="776" y="182" class="d-m xs d-c">compose up, poll /health</text>
+  </g>
+
+  <path d="M 220 168 L 236 168" class="d-arrow" marker-end="url(#w-ah)"/>
+  <path d="M 444 168 L 460 168" class="d-arrow" marker-end="url(#w-ah)"/>
+  <path d="M 668 168 L 684 168" class="d-arrow" marker-end="url(#w-ah)"/>
+  <path d="M 776 198 L 776 222" class="d-arrow" marker-end="url(#w-ah)"/>
+
+  <rect x="620" y="224" width="244" height="46" rx="8" class="d-sky"/>
+  <text x="742" y="252" class="d-t sm b d-c">write the first-run marker file</text>
+
+  <line x1="16" y1="300" x2="864" y2="300" class="d-line"/>
+
+  <text x="16" y="334" class="d-m b">EVERY LAUNCH AFTER THAT — quickStart(), marker file present</text>
+  <rect x="16" y="348" width="252" height="52" rx="8" class="d-violet"/>
+  <text x="142" y="370" class="d-t sm b d-c">wait for Docker</text>
+  <text x="142" y="388" class="d-m xs d-c">30 tries × 2s, else "start Docker Desktop"</text>
+
+  <path d="M 272 374 L 290 374" class="d-arrow" marker-end="url(#w-ah)"/>
+  <rect x="294" y="348" width="252" height="52" rx="8" class="d-violet"/>
+  <text x="420" y="370" class="d-t sm b d-c">wait for Ollama + self-heal env</text>
+  <text x="420" y="388" class="d-m xs d-c">re-applies OLLAMA_HOST if something cleared it</text>
+
+  <path d="M 550 374 L 568 374" class="d-arrow" marker-end="url(#w-ah)"/>
+  <rect x="572" y="348" width="292" height="52" rx="8" class="d-accent"/>
+  <text x="718" y="370" class="d-t sm b d-c">compose up → poll /health → navigate</text>
+  <text x="718" y="388" class="d-m xs d-c">60 tries × 2s</text>
+
+  <rect x="16" y="428" width="848" height="76" rx="9" class="d-box"/>
+  <text x="34" y="452" class="d-t sm b">Resumability is the point</text>
+  <text x="34" y="472" class="d-t sm">Docker Desktop often demands a reboot mid-install. The wizard throws a RebootRequiredError, the renderer explains it, and on relaunch every step</text>
+  <text x="34" y="490" class="d-t sm">re-checks its own precondition — installed? daemon up? image loaded? marker written? — so provisioning picks up exactly where it stopped.</text>
+</svg>
+<figcaption>
+  <a class="ref" href="../../electron/lib/firstrun.js">firstrun.js:54</a> is the first-run orchestrator ·
+  <a class="ref" href="../../electron/supervisor.js">supervisor.js:67</a> is the fast path ·
+  <a class="ref" href="../../electron/main.js">main.js:102</a> is the IPC handler that picks between
+  them based on the marker file.
+</figcaption>
+</figure>
+
+<h3>Details in the wrapper worth knowing</h3>
+
+<ul>
+  <li>
+    <strong>The window is the app.</strong> One <code>BrowserWindow</code> loads
+    <code>wizard.html</code> from disk, then <code>loadURL</code>s the local API once healthy. Progress
+    events stream from main to renderer over an IPC channel
+    (<a class="ref" href="../../electron/main.js">main.js:35</a>).
+  </li>
+  <li>
+    <strong>Context isolation is on, node integration off.</strong> The renderer touches nothing but the
+    preload bridge.
+  </li>
+  <li>
+    <strong>External links leave the app.</strong> Any URL that isn't the local API opens in the system
+    browser (<a class="ref" href="../../electron/main.js">main.js:55</a>).
+  </li>
+  <li>
+    <strong>Quit tears the stack down.</strong> <code>before-quit</code> is intercepted, runs
+    <code>compose down</code>, then quits for real — data persists in the named volume
+    (<a class="ref" href="../../electron/main.js">main.js:145</a>).
+  </li>
+  <li>
+    <strong>Assets are checksum-verified.</strong> The image tar, snapshot and corpus archive each carry
+    a SHA-256 in the asset manifest, checked before use.
+  </li>
+</ul>
+
+<h2>Everyday commands</h2>
+
+<pre><code># Start (Ollama must already be running on the host)
+docker compose up -d
+
+# Watch the API — hot reload is on, saving a .py file restarts it
+docker logs -f em_b_v2-api-1
+
+# Re-provision models without restarting the container
+curl.exe -s -X POST http://localhost:8000/admin/bootstrap-models
+
+# Full graph rebuild
+docker exec -it em_b_v2-api-1 python -m pipeline.ingest
+docker exec -it em_b_v2-api-1 python -m pipeline.load_manifest
+docker exec -it em_b_v2-api-1 python -m pipeline.enrich
+
+# Tests
+docker exec em_b_v2-api-1 pytest</code></pre>
+
+<p>
+  Helper scripts sit in <a href="../../scripts/">scripts/</a>:
+  <a class="ref" href="../../scripts/export-graph.ps1">export-graph.ps1</a> and
+  <a class="ref" href="../../scripts/import-graph.ps1">import-graph.ps1</a> move a graph snapshot between
+  machines — which is why the Neo4j image tag is pinned rather than <code>:latest</code>, since the
+  store format must match on both ends.
+  <a class="ref" href="../../scripts/verify-arc-gpu.ps1">verify-arc-gpu.ps1</a> confirms Intel Arc
+  acceleration is actually being used.
+</p>
+
+<div class="pagenav">
+  <a href="api.html">← API surface</a>
+  <a href="index.html">Back to the overview →</a>
+</div>
+
+</main>
+</body>
+</html>

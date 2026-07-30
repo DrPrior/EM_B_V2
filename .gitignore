@@ -60,6 +60,8 @@ electron/dist/
 !electron/build/**
 # Release assets produced by electron/scripts/build-release.ps1
 release/
+# Assembled USB drive layout produced by scripts/stage-usb.ps1
+usb-staging/
 
 
 #test outputs and logs

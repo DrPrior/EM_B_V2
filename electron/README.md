@@ -114,19 +114,39 @@ macOS → right-click *Open*). See *Deferred* below.
 
 ### 3. Lay out the USB drive
 
+```powershell
+pwsh -File scripts/stage-usb.ps1 -Destination E:\ -Verify   # or omit -Destination
+```
+
+`scripts/stage-usb.ps1` assembles the whole drive layout. It builds nothing —
+it checks that the installer's *baked-in* manifest matches
+`electron/resources/assets.manifest.json` (catching "assets rebuilt but
+installer wasn't", which otherwise surfaces as a checksum error on the user's
+machine), verifies every asset in `release/`, robocopies the layout, and with
+`-Verify` re-hashes what landed. With no `-Destination` it stages into
+`usb-staging/` for review.
+
 ```text
 USB drive
-  EM Knowledge Assistant-Setup-0.1.0.exe   (and/or the .dmg)
+  EM Knowledge Assistant-Setup-0.2.0.exe   (and/or the .dmg)
+  README.txt                                ← from docs/USB_README.txt
   assets/                                   ← the whole release/ folder
     emb-hybrid-api-0.1.0.tar.gz
     neo4j.dump
     project_data.tar.gz
+  explainer/                                ← from docs/explainer/ (maintainer
+    index.html ...                            docs; -SkipExplainer to omit)
 ```
 
 The app auto-detects `assets/` (removable drives, or next to the installer). If
 it can't, it shows a folder picker — the user selects the `assets` folder. The
 folder is validated (must contain the image tar) and remembered, so an
 interrupted setup resumes without re-picking.
+
+`docs/USB_README.txt` is the end-user-facing instructions (SmartScreen warning,
+the ~10 GB first-run download, "leave the USB plugged in", the Docker reboot
+resume, and troubleshooting). Keep the version string in it in sync with
+`electron/package.json`.
 
 ## Develop / smoke-test the shell
 

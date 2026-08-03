@@ -13,7 +13,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { runStream } = require('./exec');
+const { run, runStream, spawnDetached, commandExists } = require('./exec');
 const { downloadFile } = require('./download');
 const { parseModelfile } = require('./modelfile');
 const paths = require('./paths');
@@ -95,6 +95,65 @@ async function waitForRunning(retries = 30, delayMs = 2000) {
   return false;
 }
 
+/**
+ * Standard install locations for the Ollama launcher. Windows installs per-user
+ * by default but supports a per-machine install, and deployments that push it
+ * centrally usually take the latter — check both.
+ */
+function appPathCandidates() {
+  if (process.platform === 'win32') {
+    const bases = [
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs'),
+      process.env.ProgramFiles,
+      process.env['ProgramFiles(x86)'],
+    ];
+    return bases.filter(Boolean).map((b) => path.join(b, 'Ollama', 'ollama app.exe'));
+  }
+  if (process.platform === 'darwin') return ['/Applications/Ollama.app'];
+  return [];
+}
+
+/** Path to the installed Ollama launcher, or null if it isn't in a known place. */
+function installedAppPath() {
+  return appPathCandidates().find((p) => fs.existsSync(p)) || null;
+}
+
+/**
+ * True if Ollama is installed, whether or not the daemon is currently up.
+ *
+ * Distinct from `isRunning`: a machine where Ollama was pre-installed but never
+ * launched (fresh image, tray app not started yet) is installed-but-not-running,
+ * and must not be reinstalled over. Falls back to probing the CLI on PATH so a
+ * non-default install directory still counts.
+ */
+async function isInstalled() {
+  if (installedAppPath() != null) return true;
+  return commandExists('ollama', ['--version']);
+}
+
+/**
+ * Start an already-installed Ollama and wait for the daemon to answer.
+ * Returns false if it isn't installed or didn't come up, in which case the
+ * caller asks the user to start it rather than reinstalling.
+ */
+async function start(onProgress = () => {}) {
+  onProgress({ phase: 'start', message: 'Starting Ollama…' });
+  const exe = installedAppPath();
+  if (exe != null) {
+    if (process.platform === 'darwin') {
+      await run('open', ['-a', exe]).catch(() => {});
+    } else {
+      spawnDetached(exe);
+    }
+  } else if (await commandExists('ollama', ['--version'])) {
+    // Installed outside the standard locations but on PATH — serve directly.
+    spawnDetached('ollama', ['serve']);
+  } else {
+    return false;
+  }
+  return waitForRunning(30, 1000);
+}
+
 async function listTags() {
   const { json } = await apiGet('/api/tags', 8000);
   return new Set((json?.models || []).map((m) => m.name || ''));
@@ -173,6 +232,9 @@ async function installOllama(manifest, onProgress = () => {}) {
 module.exports = {
   VARIANTS,
   isRunning,
+  isInstalled,
+  installedAppPath,
+  start,
   waitForRunning,
   ensureModels,
   installOllama,

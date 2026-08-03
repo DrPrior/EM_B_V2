@@ -10,7 +10,9 @@
  *
  * The three heavy custom assets (image tar, snapshot, corpus) are read from a
  * local `assets/` folder on the USB (`assetsDir`, resolved by the caller). The
- * Docker/Ollama installers and base models still come from the internet.
+ * base models still come from the internet. Docker and Ollama are used in place
+ * when already present — their installers are fetched only if genuinely missing,
+ * so a fleet with both pre-installed never downloads or executes an installer.
  *
  * Steps: gpu → docker → ollama → models → image → data → snapshot → start.
  */
@@ -82,9 +84,24 @@ async function runFirstRun(emit, assetsDir) {
   // 3. Ollama (host-native, for GPU inference).
   step('ollama', 'active', 'Checking for Ollama…');
   if (!(await ollama.isRunning())) {
-    step('ollama', 'active', 'Installing Ollama…');
-    await ollama.installOllama(manifest, (p) =>
-      step('ollama', 'active', p.message || p.line || 'Installing Ollama…', p.fraction ?? null));
+    // Not answering is not the same as not installed. On a machine where Ollama
+    // was pre-installed but never launched, start it — reinstalling over a
+    // working install is both wrong and the kind of download-and-execute that
+    // endpoint security flags.
+    if (await ollama.isInstalled()) {
+      step('ollama', 'active', 'Starting Ollama…');
+      if (!(await ollama.start((p) => step('ollama', 'active', p.message)))) {
+        step('ollama', 'needs-user',
+          'Ollama is installed but is not running and could not be started ' +
+          'automatically. Open Ollama (Start menu on Windows, Applications on ' +
+          'macOS), then click Retry.');
+        throw new Error('Ollama is installed but could not be started');
+      }
+    } else {
+      step('ollama', 'active', 'Installing Ollama…');
+      await ollama.installOllama(manifest, (p) =>
+        step('ollama', 'active', p.message || p.line || 'Installing Ollama…', p.fraction ?? null));
+    }
   }
   // Persist + apply the host env vars the container needs to reach Ollama
   // (OLLAMA_HOST=0.0.0.0) and to keep both models warm. Idempotent: a no-op once
@@ -100,10 +117,13 @@ async function runFirstRun(emit, assetsDir) {
   }
   step('ollama', 'done', 'Ollama is running.');
 
-  // 4. Models (~10 GB, pulled from the internet on first run).
-  step('models', 'active', 'Downloading language models (~10 GB, first run only)…');
+  // 4. Models. The ~10 GB download only happens when a base model is genuinely
+  // missing; where the bases were pre-pulled this is a local variant build, and
+  // where the variants exist too it is a no-op. Open with a neutral message and
+  // let the per-model progress below report what is actually happening.
+  step('models', 'active', 'Checking language models…');
   await ollama.ensureModels((p) => {
-    const label = p.stage === 'pull' ? `Downloading ${p.model}` :
+    const label = p.stage === 'pull' ? `Downloading ${p.model} (large — first run only)` :
       p.stage === 'create' ? `Building ${p.model}` :
       p.stage === 'skip' ? `${p.model} already present` : `${p.model} ready`;
     step('models', 'active', `${label}${p.status ? ' — ' + p.status : ''}`, p.fraction ?? null);

@@ -12,21 +12,27 @@ document graph all run locally.
 
 BEFORE YOU START — please read
 ------------------------------
+This computer should already have been prepared for you: Docker, Ollama, and
+the language models installed ahead of time. If so, setup runs entirely from
+this USB drive and needs no internet at all.
+
 You need:
 
   * Windows 10 or 11, 64-bit
   * About 40 GB of free disk space
-  * An internet connection FOR THE FIRST RUN ONLY (about 10 GB is downloaded:
-    Docker Desktop, Ollama, and the language models). After setup, the app
-    works completely offline.
   * Permission to install software (administrator rights). If this is a
     work-managed computer, check with IT first.
-  * Time. First-time setup takes roughly 30-60 minutes, mostly downloading.
-    You can leave it running.
+  * Time. First-time setup takes roughly 10-20 minutes. You can leave it
+    running.
 
 Leave this USB drive plugged in for the whole of first-time setup. The app
 reads about 1 GB of prepared data from it. Once setup finishes you can remove
 the drive and it is never needed again.
+
+If the computer was NOT prepared in advance, setup still works, but it has to
+download Docker, Ollama, and about 10 GB of language models — so it needs an
+internet connection and takes 30-60 minutes instead. Everything else is the
+same, and the app is fully offline once setup finishes either way.
 
 
 INSTALLING
@@ -49,11 +55,14 @@ INSTALLING
        Graphics check -> Docker -> Ollama -> Language models -> Application
        image -> Source documents -> Knowledge graph -> Start
 
-   Just watch it. Each step shows its own progress.
+   Just watch it. Each step shows its own progress. On a prepared computer the
+   first four steps go by quickly — they find what they need already there and
+   move on.
 
-6. IMPORTANT — Docker Desktop may ask to restart your computer. If it does:
-   restart, then open "EM Knowledge Assistant" again. Setup picks up exactly
-   where it left off — nothing is lost and nothing needs redoing.
+6. IMPORTANT — if Docker Desktop asks to restart your computer, restart, then
+   open "EM Knowledge Assistant" again. Setup picks up exactly where it left
+   off — nothing is lost and nothing needs redoing. (On a prepared computer
+   this should not come up.)
 
 7. When setup finishes, the assistant opens and you can start asking
    questions.
@@ -98,6 +107,11 @@ IF SOMETHING GOES WRONG
 "Checksum mismatch — the USB copy may be corrupt"
     A file on the drive is damaged. The drive needs to be re-made; contact
     whoever gave it to you.
+
+"Ollama is installed but is not running"
+    Open Ollama from the Start menu and give it a few seconds — its icon
+    appears in the system tray (bottom-right, near the clock). Then click
+    Retry.
 
 "Ollama needs to restart"
     Find the Ollama icon in the system tray (bottom-right, near the clock),

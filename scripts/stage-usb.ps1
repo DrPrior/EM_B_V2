@@ -2,7 +2,8 @@
 <#
 .SYNOPSIS
     Assemble the complete USB drive layout for the EM Knowledge Assistant
-    desktop app: installer + assets/ + explainer/ + README.txt.
+    desktop app: installer + assets/ + explainer/ + README.txt + the
+    target-machine prep procedure.
 
 .DESCRIPTION
     Run AFTER electron/scripts/build-release.ps1 (which builds the heavy assets
@@ -13,10 +14,15 @@
 
       1. Verifies the installer's *bundled* manifest matches the manifest in the
          repo (catches "assets rebuilt but installer not rebuilt").
-      2. Verifies every asset in release/ against that manifest's SHA-256, so a
+      2. Reports the installer's Authenticode status. Unsigned only WARNS - the
+         build ships unsigned until a certificate is available - but managed
+         Windows machines will refuse an unsigned installer outright
+         ("blocked by your system administrator"), so it must never be a
+         surprise at the point of handing over a drive.
+      3. Verifies every asset in release/ against that manifest's SHA-256, so a
          bad copy is caught here rather than on the user's machine.
-      3. Copies the whole layout to -Destination with robocopy.
-      4. Re-verifies the checksums at the destination when -Verify is given
+      4. Copies the whole layout to -Destination with robocopy.
+      5. Re-verifies the checksums at the destination when -Verify is given
          (worth it for a real USB stick — flash media fails quietly).
 
     Resulting layout:
@@ -24,6 +30,7 @@
         <Destination>\
           EM Knowledge Assistant-Setup-<version>.exe
           README.txt                       (from docs/USB_README.txt)
+          TARGET_MACHINE_PREP.md           (from docs/TARGET_MACHINE_PREP.md)
           assets\                          (the whole release/ folder)
             emb-hybrid-api-<version>.tar.gz
             neo4j.dump
@@ -65,6 +72,7 @@ $distDir      = Join-Path $repoRoot "electron/dist"
 $manifestPath = Join-Path $repoRoot "electron/resources/assets.manifest.json"
 $bundledPath  = Join-Path $distDir "win-unpacked/resources/assets.manifest.json"
 $readmeSrc    = Join-Path $repoRoot "docs/USB_README.txt"
+$prepSrc      = Join-Path $repoRoot "docs/TARGET_MACHINE_PREP.md"
 $explainerSrc = Join-Path $repoRoot "docs/explainer"
 
 if (-not $Destination) { $Destination = Join-Path $repoRoot "usb-staging" }
@@ -102,7 +110,31 @@ if (Test-Path $bundledPath) {
     Write-Warning "Could not find $bundledPath - skipping the manifest-freshness check."
 }
 
-# ── 3. Verify the source assets ─────────────────────────────────────────────
+# ── 3. Report the installer's signature ─────────────────────────────────────
+# Unsigned is a warning, not an error: the build ships unsigned until a
+# certificate exists. But an unsigned installer is refused outright by
+# AppLocker/WDAC/SmartScreen-for-Business on managed machines - and elevation
+# does not bypass it - so this must be stated plainly, not discovered by whoever
+# receives the drive.
+$sig = Get-AuthenticodeSignature $installer.FullName
+if ($sig.Status -eq "Valid") {
+    $subject = $sig.SignerCertificate.Subject
+    Write-Host "==> Signature: Valid" -ForegroundColor Green
+    Write-Host "    Publisher: $subject" -ForegroundColor DarkGray
+    if ($sig.TimeStamperCertificate) {
+        Write-Host "    Timestamped - the signature outlives the certificate." -ForegroundColor DarkGray
+    } else {
+        Write-Warning "Signed but NOT timestamped: this signature stops validating when the certificate expires. Set win.signtoolOptions.rfc3161TimeStampServer and rebuild."
+    }
+} else {
+    Write-Host "==> Signature: $($sig.Status)" -ForegroundColor Yellow
+    Write-Warning ("The installer is not validly signed ($($sig.Status)). It will be blocked on " +
+                   "IT-managed Windows machines with 'blocked by your system administrator', and " +
+                   "running as Administrator does not help. Supply a certificate via CSC_LINK (or " +
+                   "win.signtoolOptions.certificateSubjectName) and rebuild before wide distribution.")
+}
+
+# ── 4. Verify the source assets ─────────────────────────────────────────────
 $assetKeys = @("image", "snapshot", "projectData")
 Write-Host "==> Verifying source assets in release\ ..." -ForegroundColor Cyan
 foreach ($key in $assetKeys) {
@@ -118,12 +150,21 @@ foreach ($key in $assetKeys) {
     Write-Host ("    OK  {0,-32} {1,8:N1} MB" -f $entry.file, ((Get-Item $file).Length/1MB)) -ForegroundColor DarkGray
 }
 
-# ── 4. Copy the layout ──────────────────────────────────────────────────────
+# ── 5. Copy the layout ──────────────────────────────────────────────────────
 Write-Host "==> Staging to $Destination ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
 Copy-Item $installer.FullName (Join-Path $Destination $installer.Name) -Force
 Copy-Item $readmeSrc (Join-Path $Destination "README.txt") -Force
+
+# The provisioning procedure travels with the drive: whoever preps the target
+# machines (install Docker + Ollama, set OLLAMA_*, pull the base models) needs it
+# before the end user ever runs the installer.
+if (Test-Path $prepSrc) {
+    Copy-Item $prepSrc (Join-Path $Destination "TARGET_MACHINE_PREP.md") -Force
+} else {
+    Write-Warning "docs/TARGET_MACHINE_PREP.md not found - the drive will ship without the machine-prep procedure."
+}
 
 # robocopy: resumable, shows throughput, and handles the multi-hundred-MB files
 # far better than Copy-Item. Exit codes 0-7 are success (8+ is a real failure).
@@ -143,7 +184,7 @@ if (-not $SkipExplainer) {
     }
 }
 
-# ── 5. Verify what actually landed ──────────────────────────────────────────
+# ── 6. Verify what actually landed ──────────────────────────────────────────
 if ($Verify) {
     Write-Host "==> Verifying the copied assets (re-hashing ~1 GB) ..." -ForegroundColor Cyan
     foreach ($key in $assetKeys) {

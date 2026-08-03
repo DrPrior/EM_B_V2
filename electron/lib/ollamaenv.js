@@ -31,9 +31,8 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
 
-const { run } = require('./exec');
+const { run, spawnDetached } = require('./exec');
 // `./ollama` is lazy-required inside the restart helpers only: it pulls in
 // `./paths` → electron, which we don't want to load (or download) for the pure
 // helpers the test harness exercises.
@@ -157,16 +156,6 @@ async function persistMac(onLine = () => {}) {
   await run('launchctl', ['unload', plistPath]).catch(() => {});
   const { code, stderr } = await run('launchctl', ['load', '-w', plistPath]);
   if (code !== 0) throw new Error(`launchctl load failed: ${stderr.trim()}`);
-}
-
-function spawnDetached(cmd, args, env) {
-  const child = spawn(cmd, args, {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    env,
-  });
-  child.unref();
 }
 
 /** Poll until the Ollama daemon is no longer answering, or the retries run out. */

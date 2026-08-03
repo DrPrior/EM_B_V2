@@ -53,6 +53,20 @@ function runStream(cmd, args = [], opts = {}, onLine = () => {}) {
   });
 }
 
+/**
+ * Spawn a process that outlives this one — GUI apps and daemons we start but
+ * don't supervise (Ollama). Output is discarded; the caller polls for readiness.
+ */
+function spawnDetached(cmd, args = [], env = process.env) {
+  const child = spawn(cmd, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    env,
+  });
+  child.unref();
+}
+
 /** True if `cmd --version` (or the given probe args) runs and exits cleanly. */
 async function commandExists(cmd, probeArgs = ['--version']) {
   try {
@@ -63,4 +77,4 @@ async function commandExists(cmd, probeArgs = ['--version']) {
   }
 }
 
-module.exports = { run, runStream, commandExists };
+module.exports = { run, runStream, spawnDetached, commandExists };

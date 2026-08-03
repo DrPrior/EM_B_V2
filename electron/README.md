@@ -144,9 +144,26 @@ folder is validated (must contain the image tar) and remembered, so an
 interrupted setup resumes without re-picking.
 
 `docs/USB_README.txt` is the end-user-facing instructions (SmartScreen warning,
-the ~10 GB first-run download, "leave the USB plugged in", the Docker reboot
-resume, and troubleshooting). Keep the version string in it in sync with
-`electron/package.json`.
+"leave the USB plugged in", the Docker reboot resume, and troubleshooting). Keep
+the version string in it in sync with `electron/package.json`.
+
+### 4. Prep the target machines
+
+`docs/TARGET_MACHINE_PREP.md` is the procedure for whoever provisions the
+machines: install Docker and Ollama, set the three `OLLAMA_*` env vars, and
+`ollama pull` the two **base** models. Done first, first run makes no network
+requests at all.
+
+This matters beyond convenience. The wizard's fallback path downloads and
+silently executes third-party installers — the dropper pattern behavioral
+endpoint security flags, on precisely the managed machines this app targets.
+Pre-provisioning keeps that path dormant.
+
+Pull the bases only; let the app build the `chat-model` / `embedding-model`
+variants. `ensureModels()` checks only that a variant *exists*, not what is in
+it, so a hand-built variant from a stale Modelfile is silently accepted and the
+app runs with wrong parameters (notably `num_ctx`). Building them in-app ties
+them to the Modelfiles shipped in that installer.
 
 ## Develop / smoke-test the shell
 
@@ -173,11 +190,16 @@ userData dir: `first-run-complete.json`, `graph-imported.json`,
   The wizard downloads and launches the official installer, then waits for the
   daemon. If a reboot is needed it shows a "finish installing and reopen" banner;
   provisioning **resumes** on the next launch (every step is idempotent).
-- **Ollama**: installed via the official installer, then the wizard pulls the
-  base models and builds the `chat-model` / `embedding-model` variants with a
-  progress bar (`/api/pull` + `/api/create`, streamed). Because the variants are
-  built here, the API container's own startup bootstrap hits its instant warm
-  path.
+- **Ollama**: gated on *installed-ness*, not liveness. Not answering on
+  `127.0.0.1:11434` does not mean absent — `isInstalled()` checks the per-user
+  and per-machine install dirs plus `ollama` on `PATH`, and a present-but-stopped
+  daemon is **started**, never reinstalled over. Only a genuinely missing Ollama
+  triggers the installer download. The wizard then pulls any missing base models
+  and builds the `chat-model` / `embedding-model` variants with a progress bar
+  (`/api/pull` + `/api/create`, streamed). Because the variants are built here,
+  the API container's own startup bootstrap hits its instant warm path. On a
+  machine prepped per `docs/TARGET_MACHINE_PREP.md` the pull is skipped and only
+  the local variant build runs.
 - **Ollama host env** (`lib/ollamaenv.js`): the container reaches Ollama over
   `host.docker.internal`, which requires the daemon to bind `0.0.0.0`, so the
   wizard **persists** `OLLAMA_HOST=0.0.0.0`, `OLLAMA_KEEP_ALIVE=-1`, and

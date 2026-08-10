@@ -47,6 +47,35 @@ const REQUIRED = Object.freeze({
   OLLAMA_MAX_LOADED_MODELS: '2',
 });
 
+// Extra host vars that unlock an *integrated* Intel GPU (Arc iGPU / Iris Xe) via
+// Ollama's Vulkan backend. Ollama enumerates the iGPU at startup but then DROPS
+// it by default — the server log says exactly "dropping integrated GPU; to
+// enable, set OLLAMA_IGPU_ENABLE=1" — and silently falls back to CPU. These two
+// flip that on (OLLAMA_VULKAN=1 in case the build doesn't default Vulkan on).
+//
+// They are applied ONLY on Intel-GPU hosts with no NVIDIA/Apple accelerator (see
+// `resolveVars`), so a CUDA or Metal machine is never pushed onto the Vulkan
+// path — those keep using their native backend exactly as before.
+const INTEL_ACCEL = Object.freeze({
+  OLLAMA_VULKAN: '1',
+  OLLAMA_IGPU_ENABLE: '1',
+});
+
+/**
+ * Resolve the full env-var set to persist for THIS machine: always the base
+ * REQUIRED three, plus INTEL_ACCEL when the detected GPU is Intel and there is
+ * no NVIDIA (CUDA) or Apple (Metal) accelerator to prefer instead. Pure so it
+ * can be unit-tested without spawning anything.
+ *
+ * @param {{intel?:boolean, nvidia?:boolean, apple?:boolean}} [gpuInfo] shape
+ *   returned by lib/gpu.js `detect()`.
+ * @returns {Record<string,string>}
+ */
+function resolveVars(gpuInfo = {}) {
+  const intelOnly = !!gpuInfo.intel && !gpuInfo.nvidia && !gpuInfo.apple;
+  return intelOnly ? { ...REQUIRED, ...INTEL_ACCEL } : { ...REQUIRED };
+}
+
 // macOS login agent that re-applies REQUIRED at every login (persistence).
 const LAUNCH_AGENT_LABEL = 'com.emassistant.ollama-env';
 
@@ -62,8 +91,8 @@ function launchAgentPath() {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`);
 }
 
-function launchAgentPlist() {
-  const cmds = Object.entries(REQUIRED)
+function launchAgentPlist(required = REQUIRED) {
+  const cmds = Object.entries(required)
     .map(([k, v]) => `launchctl setenv ${k} ${v}`)
     .join('; ');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -83,10 +112,10 @@ function launchAgentPlist() {
 `;
 }
 
-function writeLaunchAgent() {
+function writeLaunchAgent(required = REQUIRED) {
   const p = launchAgentPath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, launchAgentPlist(), 'utf8');
+  fs.writeFileSync(p, launchAgentPlist(required), 'utf8');
   return p;
 }
 
@@ -122,21 +151,21 @@ async function currentValue(name) {
  *
  * @param {Record<string,string>} current persisted name → value (missing = '').
  */
-function computeNeedsSetup(current) {
-  return Object.entries(REQUIRED).some(([name, value]) => (current[name] || '') !== value);
+function computeNeedsSetup(current, required = REQUIRED) {
+  return Object.entries(required).some(([name, value]) => (current[name] || '') !== value);
 }
 
-/** True if any REQUIRED var is not already persisted with its target value. */
-async function needsSetup() {
+/** True if any var in `required` is not already persisted with its target value. */
+async function needsSetup(required = REQUIRED) {
   const current = {};
-  for (const name of Object.keys(REQUIRED)) {
+  for (const name of Object.keys(required)) {
     current[name] = await currentValue(name);
   }
-  return computeNeedsSetup(current);
+  return computeNeedsSetup(current, required);
 }
 
-async function persistWindows(onLine = () => {}) {
-  for (const [name, value] of Object.entries(REQUIRED)) {
+async function persistWindows(required = REQUIRED, onLine = () => {}) {
+  for (const [name, value] of Object.entries(required)) {
     onLine(`Setting ${name}…`);
     // setx persists to HKCU\Environment (no admin needed for user scope).
     const { code, stderr } = await run('setx', [name, value]);
@@ -144,14 +173,14 @@ async function persistWindows(onLine = () => {}) {
   }
 }
 
-async function persistMac(onLine = () => {}) {
+async function persistMac(required = REQUIRED, onLine = () => {}) {
   // Apply to the current login session immediately so the relaunch below inherits
   // them, then install the login agent so a reboot/logout doesn't drop them.
-  for (const [name, value] of Object.entries(REQUIRED)) {
+  for (const [name, value] of Object.entries(required)) {
     await run('launchctl', ['setenv', name, value]).catch(() => {});
   }
   onLine('Installing login agent so settings survive a reboot…');
-  const plistPath = writeLaunchAgent();
+  const plistPath = writeLaunchAgent(required);
   // unload first so a rewritten plist is reloaded cleanly (ignore "not loaded").
   await run('launchctl', ['unload', plistPath]).catch(() => {});
   const { code, stderr } = await run('launchctl', ['load', '-w', plistPath]);
@@ -173,7 +202,7 @@ async function waitForStopped(retries = 12, delayMs = 500) {
  * just persisted. Returns true once the daemon is reachable again, false if we
  * couldn't relaunch it (the caller then asks the user to restart Ollama).
  */
-async function restartOllama(onLine = () => {}) {
+async function restartOllama(required = REQUIRED, onLine = () => {}) {
   onLine('Restarting Ollama to apply the new settings…');
   if (process.platform === 'darwin') {
     await run('osascript', ['-e', 'tell application "Ollama" to quit']).catch(() => {});
@@ -191,7 +220,7 @@ async function restartOllama(onLine = () => {}) {
       process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama app.exe',
     );
     if (!fs.existsSync(exe)) return false;
-    spawnDetached(exe, [], { ...process.env, ...REQUIRED });
+    spawnDetached(exe, [], { ...process.env, ...required });
   } else {
     return false;
   }
@@ -205,26 +234,39 @@ async function restartOllama(onLine = () => {}) {
  * returns immediately without touching the running daemon. Only when something
  * is missing does it write the values and restart Ollama.
  *
+ * On an Intel-only GPU host it additionally persists the iGPU-enable vars
+ * (INTEL_ACCEL) so Ollama offloads to the integrated Arc/Iris GPU instead of
+ * dropping it and falling back to CPU. NVIDIA/Apple hosts get only the base
+ * three, unchanged.
+ *
  * @param {(msg:string)=>void} onLine progress sink for wizard messages.
+ * @param {{intel?:boolean, nvidia?:boolean, apple?:boolean}} [gpuInfo] detected
+ *   GPU shape (from lib/gpu.js). Passed by the wizard, which has already probed
+ *   it; omitted, this probes it itself.
  * @returns {Promise<{supported:boolean, changed:boolean, restarted:boolean}>}
  *   `restarted` is meaningful only when `changed` is true; when it's false the
  *   caller should ask the user to restart Ollama themselves.
  */
-async function ensure(onLine = () => {}) {
+async function ensure(onLine = () => {}, gpuInfo) {
   if (!isSupportedPlatform()) return { supported: false, changed: false, restarted: false };
-  if (!(await needsSetup())) return { supported: true, changed: false, restarted: false };
+
+  const info = gpuInfo || (await require('./gpu').detect());
+  const required = resolveVars(info);
+  if (!(await needsSetup(required))) return { supported: true, changed: false, restarted: false };
 
   onLine('Applying required Ollama settings…');
-  if (process.platform === 'win32') await persistWindows(onLine);
-  else await persistMac(onLine);
+  if (process.platform === 'win32') await persistWindows(required, onLine);
+  else await persistMac(required, onLine);
 
-  const restarted = await restartOllama(onLine);
+  const restarted = await restartOllama(required, onLine);
   return { supported: true, changed: true, restarted };
 }
 
 module.exports = {
   REQUIRED,
+  INTEL_ACCEL,
   LAUNCH_AGENT_LABEL,
+  resolveVars,
   ensure,
   needsSetup,
   computeNeedsSetup,

@@ -20,8 +20,25 @@ function markerPath() {
   return path.join(paths.userDataDir(), 'graph-imported.json');
 }
 
+function readMarker() {
+  try {
+    return JSON.parse(fs.readFileSync(markerPath(), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True only if the snapshot has been loaded into the volume the desktop stack
+ * currently uses. The marker records the target volume, so a volume change
+ * (e.g. the fix that moved the desktop stack off the shared dev volume, which
+ * leaves the new volume empty) re-imports instead of starting with an empty
+ * graph. Markers written before this field existed have no `volume` and are
+ * treated as stale, forcing a one-time re-import into the correct volume.
+ */
 function alreadyImported() {
-  return fs.existsSync(markerPath());
+  const marker = readMarker();
+  return marker !== null && marker.volume === compose.NEO4J_VOLUME;
 }
 
 function dumpPath() {
@@ -58,8 +75,16 @@ async function importSnapshot(envPath, onLine = () => {}) {
   );
   if (code !== 0) throw new Error('neo4j-admin database load failed.');
 
-  fs.writeFileSync(markerPath(), JSON.stringify({ importedAt: new Date().toISOString(), database: DATABASE }), 'utf8');
-  onLine('Graph restored into em_b_v2_neo4j_data.');
+  fs.writeFileSync(
+    markerPath(),
+    JSON.stringify({
+      importedAt: new Date().toISOString(),
+      database: DATABASE,
+      volume: compose.NEO4J_VOLUME,
+    }),
+    'utf8',
+  );
+  onLine(`Graph restored into ${compose.NEO4J_VOLUME}.`);
 }
 
 module.exports = { importSnapshot, alreadyImported, dumpPath, DATABASE };

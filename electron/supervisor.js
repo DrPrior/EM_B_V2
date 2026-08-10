@@ -14,6 +14,7 @@ const compose = require('./lib/compose');
 const docker = require('./lib/docker');
 const ollama = require('./lib/ollama');
 const ollamaenv = require('./lib/ollamaenv');
+const snapshot = require('./lib/snapshot');
 const paths = require('./lib/paths');
 
 const HEALTH_URL = { host: '127.0.0.1', port: 8000, path: '/health' };
@@ -87,6 +88,16 @@ async function quickStart(envPath, emit = () => {}) {
   emit({ step: 'ollama', status: 'done', message: 'Ollama is running.' });
 
   emit({ step: 'start', status: 'active', message: 'Starting the assistant…' });
+  // Ensure the knowledge graph lives in the volume the stack currently uses.
+  // No-op once the marker matches the active volume; on a volume change (e.g.
+  // the fix that moved the desktop stack off the shared dev volume) this
+  // re-imports the locally cached dump so the app doesn't start with an empty
+  // graph. Best-effort: if the cached dump is gone we still start the stack.
+  try {
+    await snapshot.importSnapshot(envPath, (l) => emit({ step: 'start', status: 'active', message: l }));
+  } catch (err) {
+    emit({ step: 'start', status: 'active', message: `Skipping graph restore: ${err.message}` });
+  }
   const healthy = await start(envPath, () => {});
   if (!healthy) throw new Error('The API did not become healthy in time.');
   emit({ step: 'start', status: 'done', message: 'Ready.' });

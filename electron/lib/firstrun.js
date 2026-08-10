@@ -108,7 +108,7 @@ async function runFirstRun(emit, assetsDir) {
   // set. If it had to reconfigure but couldn't relaunch Ollama itself, the user
   // must restart Ollama before the container step can reach it.
   step('ollama', 'active', 'Configuring Ollama for the app…');
-  const envRes = await ollamaenv.ensure((msg) => step('ollama', 'active', msg));
+  const envRes = await ollamaenv.ensure((msg) => step('ollama', 'active', msg), g);
   if (envRes.changed && !envRes.restarted) {
     step('ollama', 'needs-user',
       'Ollama needs to restart to accept connections from the app. Quit Ollama ' +

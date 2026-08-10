@@ -42,7 +42,8 @@ Ollama and configure it to accept traffic from the container.
 ### 2. Set the required host environment variables
 
 > 🖥️ **Desktop-app users can skip this section.** The wizard sets and persists
-> all three variables automatically (on macOS it also installs a login agent so
+> these variables automatically (plus `OLLAMA_IGPU_ENABLE=1` on Intel-integrated-
+> GPU hosts — see the table below; on macOS it also installs a login agent so
 > they survive a reboot) and restarts Ollama to apply them —
 > [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js). The steps below are
 > for the **manual / developer path**.
@@ -54,6 +55,7 @@ These let the container talk to Ollama and keep both models resident in memory.
 | `OLLAMA_HOST` | `0.0.0.0` | Native Ollama listens only on `127.0.0.1` by default and **rejects** calls from the Docker bridge. Binding `0.0.0.0` lets the container reach it. |
 | `OLLAMA_KEEP_ALIVE` | `-1` | Keep models loaded indefinitely so there is no reload lag between the embedding and chat steps of each query. |
 | `OLLAMA_MAX_LOADED_MODELS` | `2` | Keep the 12B chat model and 4B embedding model co-resident; prevents Ollama from unloading one to make room for the other ("model thrashing"). |
+| `OLLAMA_IGPU_ENABLE` | `1` | **Intel integrated GPUs only** (Arc iGPU such as the Lunar Lake **Arc 140V**, or Iris Xe). Ollama enumerates the iGPU via Vulkan but then *drops* it by default (`server.log`: `dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1`) and silently falls back to CPU. This flips offload back on. **Do not set it on NVIDIA or Apple hosts** — it only affects integrated GPUs, so CUDA/Metal machines don't need it and the desktop wizard doesn't set it there. Pair with `OLLAMA_VULKAN=1` if your Ollama build doesn't enable Vulkan by default. |
 
 > ⚠️ **Security note:** `OLLAMA_HOST=0.0.0.0` exposes the **unauthenticated**
 > Ollama API on **all network interfaces**, not just localhost — anyone who can
@@ -182,9 +184,15 @@ selected (`vulkan` / `intel` / `no compatible GPUs`), warms `chat-model` and
 reports tok/s, then reads `/api/ps` (`size` vs `size_vram`) and prints a verdict:
 
 - **`100% GPU`** — fully offloaded to the Arc. This is the goal.
-- **`100% CPU`** — *not* accelerated: Vulkan/Arc was not used. Check the backend
-  log lines it prints, confirm your Ollama version supports this Arc GPU, and if
-  needed try Intel's **ipex-llm** portable Ollama build.
+- **`100% CPU`** — *not* accelerated: Vulkan/Arc was not used. **First check for
+  an integrated GPU being dropped:** if the backend log shows
+  `dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1` (common on Intel
+  Arc iGPUs like the Lunar Lake **Arc 140V** and on Iris Xe), set
+  `OLLAMA_IGPU_ENABLE=1` (see the env-var table above) and restart Ollama — that
+  alone flips the same models from `100% CPU` to `100% GPU`. The desktop app sets
+  this automatically on Intel hosts. Only if the flag doesn't help: confirm your
+  Ollama version supports this GPU, and as a last resort try Intel's **ipex-llm**
+  portable Ollama build.
 - **partial split** — the model doesn't fit in Arc VRAM alongside the second
   resident model (`OLLAMA_MAX_LOADED_MODELS=2`). Use a smaller quant or lower
   that limit.

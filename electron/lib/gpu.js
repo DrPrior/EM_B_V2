@@ -1,10 +1,13 @@
 'use strict';
 
 /**
- * Best-effort GPU detection, used only to tailor wizard messaging and hint at
- * acceleration. Actual acceleration is Ollama's job and is auto-detected at
- * runtime (CUDA for Nvidia, Vulkan for Intel Arc/iGPU, Metal on Apple Silicon,
- * CPU fallback otherwise) — nothing here changes how inference runs.
+ * Best-effort GPU detection. Two consumers:
+ *   1. Wizard messaging (the `accel` string below).
+ *   2. lib/ollamaenv.js `ensure()`, which uses the `intel`/`nvidia`/`apple`
+ *      flags to decide whether to persist the Intel iGPU-enable env vars
+ *      (OLLAMA_VULKAN=1 / OLLAMA_IGPU_ENABLE=1). Ollama otherwise DROPS an
+ *      integrated Intel GPU and falls back to CPU. NVIDIA (CUDA) and Apple
+ *      (Metal) hosts are left on their native backend untouched.
  */
 
 const os = require('os');
@@ -40,8 +43,8 @@ async function detect() {
   let accel = 'CPU (no supported GPU detected)';
   if (apple) accel = 'Apple Metal';
   else if (nvidia) accel = 'Nvidia CUDA';
-  else if (intelArc) accel = 'Intel Arc (Vulkan — experimental)';
-  else if (intel) accel = 'Intel integrated (Vulkan — experimental, may fall back to CPU)';
+  else if (intelArc) accel = 'Intel Arc (Vulkan, iGPU offload enabled)';
+  else if (intel) accel = 'Intel integrated (Vulkan, iGPU offload enabled)';
 
   return { names, nvidia, intel, intelArc, apple, accel };
 }

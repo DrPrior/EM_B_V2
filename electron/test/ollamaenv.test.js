@@ -28,6 +28,43 @@ test('REQUIRED is frozen (target values are constants, not mutated at runtime)',
   assert.ok(Object.isFrozen(ollamaenv.REQUIRED));
 });
 
+test('INTEL_ACCEL carries the iGPU-enable vars and is frozen', () => {
+  assert.deepEqual(ollamaenv.INTEL_ACCEL, {
+    OLLAMA_VULKAN: '1',
+    OLLAMA_IGPU_ENABLE: '1',
+  });
+  assert.ok(Object.isFrozen(ollamaenv.INTEL_ACCEL));
+});
+
+test('resolveVars: Intel-only host adds the iGPU-enable vars', () => {
+  const vars = ollamaenv.resolveVars({ intel: true, nvidia: false, apple: false });
+  assert.deepEqual(vars, { ...ollamaenv.REQUIRED, ...ollamaenv.INTEL_ACCEL });
+});
+
+test('resolveVars: NVIDIA present → base three only (CUDA left untouched)', () => {
+  const vars = ollamaenv.resolveVars({ intel: true, nvidia: true, apple: false });
+  assert.deepEqual(vars, { ...ollamaenv.REQUIRED });
+});
+
+test('resolveVars: Apple Silicon → base three only (Metal left untouched)', () => {
+  const vars = ollamaenv.resolveVars({ intel: false, nvidia: false, apple: true });
+  assert.deepEqual(vars, { ...ollamaenv.REQUIRED });
+});
+
+test('resolveVars: no GPU info → base three only', () => {
+  assert.deepEqual(ollamaenv.resolveVars(), { ...ollamaenv.REQUIRED });
+  assert.deepEqual(ollamaenv.resolveVars({}), { ...ollamaenv.REQUIRED });
+});
+
+test('resolveVars does not mutate REQUIRED', () => {
+  ollamaenv.resolveVars({ intel: true });
+  assert.deepEqual(ollamaenv.REQUIRED, {
+    OLLAMA_HOST: '0.0.0.0',
+    OLLAMA_KEEP_ALIVE: '-1',
+    OLLAMA_MAX_LOADED_MODELS: '2',
+  });
+});
+
 test('computeNeedsSetup: false only when every var already matches', () => {
   const exact = { ...ollamaenv.REQUIRED };
   assert.equal(ollamaenv.computeNeedsSetup(exact), false);

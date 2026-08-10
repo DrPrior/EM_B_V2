@@ -59,4 +59,12 @@ services:
 
 volumes:
   neo4j_data:
-    name: em_b_v2_neo4j_data
+    # Desktop-exclusive volume name. It MUST NOT be shared with the development
+    # docker-compose.yml volume (em_b_v2_neo4j_data): Neo4j bakes the NEO4J_AUTH
+    # password into the volume on first init and ignores NEO4J_AUTH forever after,
+    # so a volume created by the dev stack (fixed .env password) rejects the
+    # desktop app's per-install random password — surfacing as a "Neo4j Auth"
+    # error. Keeping the desktop stack on its own volume guarantees the volume is
+    # initialized with the password the desktop app actually authenticates with.
+    # If you rename this, update electron/lib/compose.js NEO4J_VOLUME to match.
+    name: emb_desktop_neo4j_data

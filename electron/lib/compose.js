@@ -12,6 +12,13 @@ const paths = require('./paths');
 
 const PROJECT = 'em_b_hybrid';
 
+// Name of the Neo4j data volume declared in docker-compose.desktop.yml. Kept
+// here so the snapshot importer can tie its "already imported" marker to the
+// volume and re-import if the volume name ever changes (e.g. after the fix that
+// moved the desktop stack off the shared dev volume). MUST match the `name:`
+// under `volumes.neo4j_data` in docker-compose.desktop.yml.
+const NEO4J_VOLUME = 'emb_desktop_neo4j_data';
+
 function baseArgs(envPath) {
   return ['compose', '--env-file', envPath, '-f', paths.composePath(), '-p', PROJECT];
 }
@@ -39,4 +46,4 @@ async function psState(envPath, service) {
   return code === 0 ? stdout.trim() : '';
 }
 
-module.exports = { PROJECT, baseArgs, up, down, stop, runOneOff, psState };
+module.exports = { PROJECT, NEO4J_VOLUME, baseArgs, up, down, stop, runOneOff, psState };

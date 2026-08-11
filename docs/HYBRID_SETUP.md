@@ -48,13 +48,21 @@ Ollama and configure it to accept traffic from the container.
 > [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js). The steps below are
 > for the **manual / developer path**.
 
-These let the container talk to Ollama and keep both models resident in memory.
+These let the container talk to Ollama, keep both models resident in memory, and
+tune inference throughput. The first three are connectivity/warmth; the next
+three (`OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`, `OLLAMA_NUM_PARALLEL`)
+are backend-agnostic performance settings that help NVIDIA, Metal, and Intel
+hosts alike — see [the Performance explainer](explainer/gpu-performance.html) for
+the measurements behind them.
 
 | Variable | Value | Why |
 |---|---|---|
 | `OLLAMA_HOST` | `0.0.0.0` | Native Ollama listens only on `127.0.0.1` by default and **rejects** calls from the Docker bridge. Binding `0.0.0.0` lets the container reach it. |
 | `OLLAMA_KEEP_ALIVE` | `-1` | Keep models loaded indefinitely so there is no reload lag between the embedding and chat steps of each query. |
 | `OLLAMA_MAX_LOADED_MODELS` | `2` | Keep the 12B chat model and 4B embedding model co-resident; prevents Ollama from unloading one to make room for the other ("model thrashing"). |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Fused attention over the KV cache. Cuts the time to process a large retrieval prompt **and** the per-token slowdown a long context causes — the two costs that dominate query latency. Backend-agnostic: CUDA/Metal support it fully; on a Vulkan build without it, it is silently ignored (safe to set anywhere). |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | Store the KV cache at 8-bit, roughly halving its memory (requires `OLLAMA_FLASH_ATTENTION=1`). Frees headroom on a shared-VRAM iGPU so the two co-resident models aren't squeezed; negligible quality impact. |
+| `OLLAMA_NUM_PARALLEL` | `1` | One inference slot instead of an auto-chosen 2–4. Each slot reserves its own KV cache; on a shared-VRAM host that reservation is what evicts a co-resident model and causes 17–25 s mid-session reload spikes. A single-user app never needs more than one slot. |
 | `OLLAMA_IGPU_ENABLE` | `1` | **Intel integrated GPUs only** (Arc iGPU such as the Lunar Lake **Arc 140V**, or Iris Xe). Ollama enumerates the iGPU via Vulkan but then *drops* it by default (`server.log`: `dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1`) and silently falls back to CPU. This flips offload back on. **Do not set it on NVIDIA or Apple hosts** — it only affects integrated GPUs, so CUDA/Metal machines don't need it and the desktop wizard doesn't set it there. Pair with `OLLAMA_VULKAN=1` if your Ollama build doesn't enable Vulkan by default. |
 
 > ⚠️ **Security note:** `OLLAMA_HOST=0.0.0.0` exposes the **unauthenticated**
@@ -75,7 +83,7 @@ These let the container talk to Ollama and keep both models resident in memory.
 
 **Windows (persists permanently):**
 1. Search the Start Menu for **"Edit the system environment variables"**.
-2. Add the three **System variables** above (or use `setx OLLAMA_HOST 0.0.0.0`, etc.).
+2. Add the **System variables** from the table above (or use `setx OLLAMA_HOST 0.0.0.0`, etc.).
 3. Quit Ollama from the system tray and relaunch it.
 
 Set once — every future restart and reboot picks them up automatically. (Do
@@ -87,6 +95,9 @@ session-only and won't survive.)
 launchctl setenv OLLAMA_HOST "0.0.0.0"
 launchctl setenv OLLAMA_KEEP_ALIVE "-1"
 launchctl setenv OLLAMA_MAX_LOADED_MODELS "2"
+launchctl setenv OLLAMA_FLASH_ATTENTION "1"
+launchctl setenv OLLAMA_KV_CACHE_TYPE "q8_0"
+launchctl setenv OLLAMA_NUM_PARALLEL "1"
 ```
 Then fully quit and relaunch the Ollama app.
 
@@ -106,7 +117,7 @@ Then fully quit and relaunch the Ollama app.
 >   <key>ProgramArguments</key>
 >   <array>
 >     <string>sh</string><string>-c</string>
->     <string>launchctl setenv OLLAMA_HOST 0.0.0.0; launchctl setenv OLLAMA_KEEP_ALIVE -1; launchctl setenv OLLAMA_MAX_LOADED_MODELS 2</string>
+>     <string>launchctl setenv OLLAMA_HOST 0.0.0.0; launchctl setenv OLLAMA_KEEP_ALIVE -1; launchctl setenv OLLAMA_MAX_LOADED_MODELS 2; launchctl setenv OLLAMA_FLASH_ATTENTION 1; launchctl setenv OLLAMA_KV_CACHE_TYPE q8_0; launchctl setenv OLLAMA_NUM_PARALLEL 1</string>
 >   </array>
 >   <key>RunAtLoad</key><true/>
 > </dict>

@@ -235,8 +235,13 @@ class RAGService:
                 "otherwise state that you don't have enough information.)"
             )
 
+        # Inject only the most recent turns so the prompt (and its prompt-eval
+        # cost) doesn't grow unbounded as a conversation runs long. The full
+        # history is still retained in the session store for /history reads.
+        inject = settings.history_injection_turns * 2  # 2 messages per turn
+        recent_history = history[-inject:] if inject > 0 else []
         messages: list[dict[str, str]] = [{"role": "system", "content": _SYSTEM_PROMPT}]
-        messages.extend(cast(list[dict[str, str]], history))
+        messages.extend(cast(list[dict[str, str]], recent_history))
         messages.append({"role": "user", "content": user_content})
 
         return sid, messages, sources

@@ -16,11 +16,14 @@ const path = require('node:path');
 
 const ollamaenv = require('../lib/ollamaenv');
 
-test('REQUIRED carries the three host vars the container/warmth need', () => {
+test('REQUIRED carries the host connectivity, warmth, and throughput vars', () => {
   assert.deepEqual(ollamaenv.REQUIRED, {
     OLLAMA_HOST: '0.0.0.0',
     OLLAMA_KEEP_ALIVE: '-1',
     OLLAMA_MAX_LOADED_MODELS: '2',
+    OLLAMA_FLASH_ATTENTION: '1',
+    OLLAMA_KV_CACHE_TYPE: 'q8_0',
+    OLLAMA_NUM_PARALLEL: '1',
   });
 });
 
@@ -62,6 +65,9 @@ test('resolveVars does not mutate REQUIRED', () => {
     OLLAMA_HOST: '0.0.0.0',
     OLLAMA_KEEP_ALIVE: '-1',
     OLLAMA_MAX_LOADED_MODELS: '2',
+    OLLAMA_FLASH_ATTENTION: '1',
+    OLLAMA_KV_CACHE_TYPE: 'q8_0',
+    OLLAMA_NUM_PARALLEL: '1',
   });
 });
 

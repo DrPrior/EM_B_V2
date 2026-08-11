@@ -27,7 +27,7 @@ def generate_response(
         The generated text.
     """
     url = f"{settings.ollama_base_url}/api/generate"
-    options: dict = {"temperature": 0.3, "num_ctx": 8192}
+    options: dict = {"temperature": 0.3, "num_ctx": settings.chat_num_ctx}
     if num_predict is not None:
         options["num_predict"] = num_predict
     payload: dict = {
@@ -60,7 +60,11 @@ def generate_chat_response(messages: list[dict], session_id: str | None = None) 
         "model": settings.chat_model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0.3, "num_ctx": 8192},
+        "options": {
+            "temperature": 0.3,
+            "num_ctx": settings.chat_num_ctx,
+            "num_predict": settings.answer_max_tokens,
+        },
     }
     response = requests.post(url, json=payload)
     response.raise_for_status()
@@ -86,7 +90,11 @@ def generate_chat_stream(
         "model": settings.chat_model,
         "messages": messages,
         "stream": True,
-        "options": {"temperature": 0.3, "num_ctx": 8192},
+        "options": {
+            "temperature": 0.3,
+            "num_ctx": settings.chat_num_ctx,
+            "num_predict": settings.answer_max_tokens,
+        },
     }
     with requests.post(url, json=payload, stream=True) as response:
         response.raise_for_status()

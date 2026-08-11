@@ -20,12 +20,13 @@ def test_settings_defaults_match_documented_values(
     assert settings.chat_model == "chat-model"
     assert settings.embedding_model == "embedding-model"
     assert settings.max_history_turns == 10
-    assert settings.retrieval_top_k == 5
+    assert settings.retrieval_top_k == 3
+    assert settings.answer_max_tokens == 700
     assert settings.chunk_max_tokens == 512
     assert settings.chunk_overlap_tokens == 64
     assert settings.vector_retrieval_min_score == 0.75
     assert settings.graph_retrieval_min_score == 0.78
-    assert settings.graph_retrieval_limit == 3
+    assert settings.graph_retrieval_limit == 2
     assert settings.rate_limit_per_minute == 20
 
 

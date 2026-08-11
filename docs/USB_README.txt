@@ -1,6 +1,6 @@
 ================================================================================
  EM KNOWLEDGE ASSISTANT — Installation from this USB drive
- Version 0.2.0 (Windows)
+ Version 0.3.1 (Windows)
 ================================================================================
 
 WHAT THIS IS
@@ -41,7 +41,7 @@ INSTALLING
 
 2. Double-click:
 
-       EM Knowledge Assistant-Setup-0.2.0.exe
+       EM Knowledge Assistant-Setup-0.3.1.exe
 
 3. Windows will warn you: "Windows protected your PC" (SmartScreen). This is
    expected — the installer is not code-signed yet. Click "More info", then
@@ -80,7 +80,7 @@ Leave them alone — the assistant manages them.
 
 WHAT'S ON THIS DRIVE
 --------------------
-  EM Knowledge Assistant-Setup-0.2.0.exe   The installer — start here.
+  EM Knowledge Assistant-Setup-0.3.1.exe   The installer — start here.
 
   assets\                                  Prepared data the setup reads
                                            (the application, the document

@@ -152,7 +152,13 @@ foreach ($key in $assetKeys) {
 
 # ── 5. Copy the layout ──────────────────────────────────────────────────────
 Write-Host "==> Staging to $Destination ..." -ForegroundColor Cyan
-New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+# New-Item chokes on a bare drive root ("D:\") with "The path is not of a
+# legal form" even though the path is valid and already exists - which is
+# exactly what -Destination points at for a real USB drive. Only create it
+# when it's actually missing (e.g. a subfolder destination).
+if (-not (Test-Path $Destination)) {
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+}
 
 Copy-Item $installer.FullName (Join-Path $Destination $installer.Name) -Force
 Copy-Item $readmeSrc (Join-Path $Destination "README.txt") -Force

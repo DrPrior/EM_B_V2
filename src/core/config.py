@@ -82,9 +82,38 @@ class Settings(BaseSettings):
         default=10,
         description="Maximum number of conversation turns to retain per session",
     )
+    history_injection_turns: int = Field(
+        default=4,
+        description=(
+            "How many recent conversation turns to prepend to the LLM prompt. The "
+            "session store still retains up to max_history_turns; injecting fewer "
+            "caps prompt growth — and prompt-eval latency — as a conversation runs "
+            "long. Set >= max_history_turns to inject the full retained history."
+        ),
+    )
+    chat_num_ctx: int = Field(
+        default=8192,
+        description=(
+            "Context window (KV-cache size) requested for chat-model calls. Must "
+            "hold the system prompt + retrieved context + injected history. 8192 "
+            "was chosen so history isn't silently truncated; lowering it shrinks "
+            "the KV cache (less VRAM, cheaper attention) but risks truncation — "
+            "measure real prompt sizes before reducing."
+        ),
+    )
     retrieval_top_k: int = Field(
-        default=5,
+        default=3,
         description="Number of chunks to retrieve via vector search per query",
+    )
+    answer_max_tokens: int = Field(
+        default=700,
+        description=(
+            "Cap (num_predict) on tokens generated for a chat answer. Bounds the "
+            "dominant latency cost on GPU-constrained hosts — an uncapped reply can "
+            "run to ~1700 tokens at the iGPU's fixed token rate. The system prompt "
+            "already asks for concise answers, so this rarely truncates a real "
+            "response; raise it if answers are being cut off mid-sentence."
+        ),
     )
     chunk_max_tokens: int = Field(
         default=512,
@@ -108,7 +137,7 @@ class Settings(BaseSettings):
         ),
     )
     graph_retrieval_limit: int = Field(
-        default=3,
+        default=2,
         description="Maximum number of graph-augmented chunks to add per query",
     )
     rate_limit_per_minute: int = Field(

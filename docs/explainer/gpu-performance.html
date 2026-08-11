@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EM_B_Hybrid — GPU Performance Tuning</title>
+<link rel="stylesheet" href="explainer.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><a href="index.html">EM_B_Hybrid · Code Explainer</a></div>
+    <nav>
+      <a href="index.html">Overview</a>
+      <a href="pipeline.html">Pipeline</a>
+      <a href="rag.html">RAG&nbsp;query</a>
+      <a href="graph-schema.html">Graph</a>
+      <a href="api.html">API</a>
+      <a href="deployment.html">Deployment</a>
+      <a href="gpu-performance.html" class="active">Performance</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<h1>Why it feels sluggish — and what to do about it</h1>
+<p class="lede">
+  The Arc 140V iGPU <em>is</em> being used — both models sit 100% in VRAM and stay warm. The slowness
+  is not "the GPU isn't engaged." It's that a single chat answer processes a large retrieval prompt and
+  then generates a long reply at the iGPU's fixed token rate. This page measures exactly where the
+  seconds go, then lists tuning levers that <strong>keep the current models</strong> and are
+  <strong>safe on NVIDIA and Metal machines</strong> — the ones you asked to protect before considering
+  a model swap.
+</p>
+
+<div class="note">
+  <strong>Where these numbers came from</strong>
+  <p>
+    All figures below are from this running stack on 2026-08-11: the per-stage <code>em_b.timing</code>
+    logs (<a class="ref" href="../../src/core/timing.py">src/core/timing.py</a>) for real chat queries,
+    plus isolated benchmarks fired straight at <code>/api/generate</code> on the warm
+    <code>chat-model</code>. The before/after further down is a <em>measured</em> A/B on the live models,
+    not a projection — same question, uncapped code vs. the tuned code.
+  </p>
+</div>
+
+<h2>The confirmed baseline</h2>
+
+<p>
+  A representative chat request took <strong>~130&nbsp;s</strong> (a short answer) to <strong>~240&nbsp;s</strong>
+  (a verbose one). Here is the worst-case query, broken down from its actual timing lines:
+</p>
+
+<figure>
+<svg viewBox="0 0 900 300" role="img" aria-label="Latency budget of one chat query, by stage">
+  <!-- axis -->
+  <text x="16" y="26" class="d-m b">ONE CHAT QUERY — where ~240 seconds go (worst-case, warm models)</text>
+
+  <!-- scale: 0..240s mapped to x 150..870 (720px = 240s => 3px/s) -->
+  <line x1="150" y1="250" x2="870" y2="250" class="d-line"/>
+  <text x="150" y="270" class="d-m xs d-c">0s</text>
+  <text x="330" y="270" class="d-m xs d-c">60s</text>
+  <text x="510" y="270" class="d-m xs d-c">120s</text>
+  <text x="690" y="270" class="d-m xs d-c">180s</text>
+  <text x="864" y="270" class="d-m xs d-e">240s</text>
+  <line x1="330" y1="44" x2="330" y2="250" class="d-life"/>
+  <line x1="510" y1="44" x2="510" y2="250" class="d-life"/>
+  <line x1="690" y1="44" x2="690" y2="250" class="d-life"/>
+
+  <!-- rows: y each 30 -->
+  <!-- embed 7s -> width 21 -->
+  <text x="140" y="66" class="d-t sm d-e">embed</text>
+  <rect x="150" y="54" width="21" height="18" rx="3" class="d-sky"/>
+  <text x="177" y="67" class="d-m xs">7s · embedding-model</text>
+
+  <!-- vector 1s -->
+  <text x="140" y="96" class="d-t sm d-e">vector search</text>
+  <rect x="150" y="84" width="4" height="18" rx="2" class="d-green"/>
+  <text x="160" y="97" class="d-m xs">1s · Neo4j</text>
+
+  <!-- entity extraction 22s -> width 66 -->
+  <text x="140" y="126" class="d-t sm d-e">entity extract</text>
+  <rect x="150" y="114" width="66" height="18" rx="3" class="d-violet"/>
+  <text x="222" y="127" class="d-m xs">22s · a whole 2nd LLM call (incl. a reload spike)</text>
+
+  <!-- graph query 1.5s -->
+  <text x="140" y="156" class="d-t sm d-e">graph search</text>
+  <rect x="150" y="144" width="5" height="18" rx="2" class="d-green"/>
+  <text x="161" y="157" class="d-m xs">1.5s · Neo4j</text>
+
+  <!-- chat prompt eval 19s -> width 57 -->
+  <text x="140" y="186" class="d-t sm d-e">chat: prompt</text>
+  <rect x="150" y="174" width="57" height="18" rx="3" class="d-amber"/>
+  <text x="213" y="187" class="d-m xs">19s · process 2,442 context tokens @130 tok/s</text>
+
+  <!-- chat gen 189s -> width 567 -->
+  <text x="140" y="216" class="d-t sm d-e">chat: generate</text>
+  <rect x="150" y="204" width="567" height="18" rx="3" class="d-rose"/>
+  <text x="150" y="238" class="d-t sm b" style="fill:var(--rose)">189s · generate 1,660 tokens @ 8.8 tok/s  ← the dominant cost</text>
+</svg>
+<figcaption>
+  Roughly <strong>80% of the wall-clock is the model generating the answer</strong>, and almost all of
+  the rest is processing the retrieval context and the separate entity-extraction call. The two Neo4j
+  searches and the embedding are noise by comparison.
+</figcaption>
+</figure>
+
+<div class="grid">
+  <div class="card">
+    <h4>Generation floor: ~11 tok/s</h4>
+    <p>
+      Warm, tiny prompt: <strong>120 tokens in 10.6&nbsp;s = 11.3&nbsp;tok/s</strong>. This is the iGPU's
+      memory-bandwidth ceiling for a 12B Q4 model. Nothing but a smaller/lighter model moves this
+      floor much — which is why it's out of scope here.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Context hurts <em>twice</em></h4>
+    <p>
+      With a ~4,900-token prompt: prompt processing alone was <strong>49&nbsp;s</strong>, and generation
+      sagged from 11.3 to <strong>7.8&nbsp;tok/s</strong> — attention now scans a huge KV cache on every
+      token. Big prompts cost you up front <em>and</em> slow every token after.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Every query runs the LLM twice</h4>
+    <p>
+      Before the answer, <a class="ref" href="../../pipeline/extract.py">extract.py:75</a> makes a full
+      <code>chat-model</code> call to pull entities for graph search — ~6–22&nbsp;s on its own, sometimes
+      dragging in a model-reload spike.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Reload spikes: 17–25 s</h4>
+    <p>
+      Several timing lines show <code>load=17,202ms</code> / <code>load=25,571ms</code> — the model
+      being re-loaded mid-session despite <code>OLLAMA_KEEP_ALIVE=-1</code>. On a 16&nbsp;GB shared budget,
+      KV pressure can evict a co-resident model. Avoidable.
+    </p>
+  </div>
+</div>
+
+<h2>The two throughput numbers that explain everything</h2>
+
+<p>
+  The Arc 140V has two fixed speeds, and the whole latency budget is just these two numbers multiplied
+  by token counts you <em>can</em> influence:
+</p>
+
+<figure>
+<svg viewBox="0 0 900 250" role="img" aria-label="Prompt processing versus generation throughput, small versus large context">
+  <text x="16" y="26" class="d-m b">MEASURED THROUGHPUT — tokens per second</text>
+
+  <!-- left group: prompt eval -->
+  <text x="120" y="66" class="d-t sm b">Prompt processing (reading context)</text>
+  <!-- scale 0..140 tok/s over 300px from x120..420 => ~2.14px -->
+  <line x1="120" y1="150" x2="120" y2="80" class="d-line"/>
+  <rect x="140" y="86" width="278" height="20" rx="3" class="d-amber"/>
+  <text x="424" y="101" class="d-t sm">130 tok/s · small / batched</text>
+  <rect x="140" y="116" width="214" height="20" rx="3" class="d-amber" style="opacity:.7"/>
+  <text x="360" y="131" class="d-t sm">100 tok/s · at ~4.9K tokens</text>
+  <text x="120" y="168" class="d-m xs">Linear: a 4,900-token prompt = ~49s before the first token appears.</text>
+
+  <!-- right group: generation -->
+  <text x="120" y="206" class="d-t sm b" style="">Generation (writing the answer)</text>
+  <rect x="140" y="216" width="90" height="14" rx="3" class="d-rose"/>
+  <text x="236" y="227" class="d-t sm">11.3 tok/s warm · 7.8 tok/s at full context</text>
+</svg>
+<figcaption>
+  You can't change the slopes without changing the model. You <em>can</em> change how many tokens flow
+  through each: fewer context tokens (cheaper, faster prompt eval + less KV to scan) and a bounded
+  answer length (fewer generation tokens).
+</figcaption>
+</figure>
+
+<h2>What's already right — don't undo it</h2>
+<div class="grid">
+  <div class="card">
+    <h4>Models pinned in VRAM</h4>
+    <p>
+      <code>OLLAMA_KEEP_ALIVE=-1</code> + <code>OLLAMA_MAX_LOADED_MODELS=2</code>: both models report
+      <code>size_vram == size</code> and never expire. Keep this.
+    </p>
+  </div>
+  <div class="card">
+    <h4>iGPU offload enabled</h4>
+    <p>
+      <code>OLLAMA_IGPU_ENABLE=1</code> + <code>OLLAMA_VULKAN=1</code>, applied only on Intel-only hosts
+      by <a class="ref" href="../../electron/lib/ollamaenv.js">ollamaenv.js:74</a>. CUDA/Metal hosts are
+      untouched — preserve that guard for every change below.
+    </p>
+  </div>
+  <div class="card">
+    <h4>Entity extraction is already capped</h4>
+    <p>
+      Its output is bounded at <code>entity_extraction_max_tokens=256</code> and constrained to JSON.
+      The cost is the <em>call itself</em>, not runaway output.
+    </p>
+  </div>
+</div>
+
+<h2>The levers, ranked</h2>
+
+<p>
+  Two families. <strong>Host env tuning</strong> is set once in the Ollama daemon environment and helps
+  every backend. <strong>App-code tuning</strong> lives in this repo and changes how many tokens the
+  model has to chew. Each row is tagged for its effect on a CUDA/Metal machine.
+</p>
+
+<h3>Family A — Host environment (Vulkan / CUDA / Metal all benefit)</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Change</th><th>Why it helps here</th><th>Est. impact</th><th>NVIDIA / Metal</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>OLLAMA_FLASH_ATTENTION=1</code></td>
+      <td>Fused attention over the KV cache — targets the prompt-eval cost and the long-context
+          generation sag. <strong>Measured neutral on the Arc</strong> (engages via Vulkan but no speedup);
+          the real win is on CUDA/Metal.</td>
+      <td>CUDA/Metal: faster. Arc iGPU: ~0 (verified)</td>
+      <td><span class="tag post">SAFE — helps</span> CUDA/Metal support it fully; Vulkan engages but is no faster here</td>
+    </tr>
+    <tr>
+      <td><code>OLLAMA_KV_CACHE_TYPE=q8_0</code></td>
+      <td>Halves KV-cache memory (needs flash attention on). Frees headroom on the 16&nbsp;GB shared
+          budget so the two models never get squeezed.</td>
+      <td>Less VRAM pressure → fewer reload spikes; negligible quality change</td>
+      <td><span class="tag post">SAFE</span> same mechanism on all backends</td>
+    </tr>
+    <tr>
+      <td><code>OLLAMA_NUM_PARALLEL=1</code></td>
+      <td>One context slot instead of an auto-chosen 2–4. Each slot reserves its own KV cache; on a
+          shared iGPU that's what evicts the co-resident model and causes the 17–25&nbsp;s reloads.</td>
+      <td>Kills reload spikes; steadier latency</td>
+      <td><span class="tag get">NEUTRAL</span> single-user app never needed the concurrency</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note">
+  <strong>Where to wire these so they persist</strong>
+  <p>
+    Add them to the frozen <code>REQUIRED</code> map in
+    <a class="ref" href="../../electron/lib/ollamaenv.js">ollamaenv.js:44</a> (the desktop wizard already
+    persists that map via <code>setx</code> on Windows and a LaunchAgent on macOS, then restarts Ollama).
+    Flash attention and KV type are backend-agnostic, so they belong in <code>REQUIRED</code> alongside
+    <code>OLLAMA_KEEP_ALIVE</code> — <em>not</em> in the Intel-only <code>INTEL_ACCEL</code> block. Keep
+    <code>docs/HYBRID_SETUP.md</code>'s env table in sync (the file's own comment says so).
+  </p>
+</div>
+
+<div class="note gotcha">
+  <strong>Measured on the Arc 140V: flash attention engages but does <em>not</em> speed it up</strong>
+  <p>
+    We applied all three vars, restarted Ollama, and confirmed from <code>server.log</code> that flash
+    attention is live on the Vulkan backend (<code>llama_context: flash_attn = enabled</code>) and the KV
+    cache is now <code>q8_0</code> (~323&nbsp;MiB, roughly half of <code>f16</code>). But the throughput was
+    flat: generation stayed at <strong>~8&nbsp;tok/s</strong> and prompt processing did not improve — within
+    noise of the pre-change numbers. On this integrated GPU, the Vulkan flash-attention kernel simply
+    isn't faster for this model.
+  </p>
+  <p>
+    So keep these vars, but for the <em>right</em> reasons on an iGPU: <code>q8_0</code> halves KV memory
+    (VRAM headroom on the shared 16&nbsp;GB budget) and <code>NUM_PARALLEL=1</code> removes the reload
+    spikes — while <code>FLASH_ATTENTION</code> is the genuine speed win on <strong>CUDA and Metal</strong>,
+    which is why it belongs in the universal env map. On the Arc itself, the real latency wins are all in
+    Family&nbsp;B.
+  </p>
+</div>
+
+<h3>Family B — App code (fewer tokens; same model, same behavior shape)</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Change</th><th>Where</th><th>Why it helps</th><th>NVIDIA / Metal</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Cap the answer length</strong> — add <code>num_predict</code> (~700) to the chat
+          <code>options</code></td>
+      <td><a class="ref" href="../../src/services/llm.py">llm.py:63</a> and
+          <a class="ref" href="../../src/services/llm.py">llm.py:89</a></td>
+      <td>The 1,660-token answers are the 189&nbsp;s. A 700-token bound at ~11&nbsp;tok/s ≈ 65&nbsp;s — the
+          single biggest cut. Verbose replies were never asked for; the prompt already says "be concise."</td>
+      <td><span class="tag post">SAFE</span> identical effect everywhere</td>
+    </tr>
+    <tr>
+      <td><strong>Trim retrieval</strong> — <code>retrieval_top_k</code> 5→3,
+          <code>graph_retrieval_limit</code> 3→2</td>
+      <td><a class="ref" href="../../src/core/config.py">config.py:85</a>,
+          <a class="ref" href="../../src/core/config.py">config.py:110</a></td>
+      <td>Up to 8 chunks × 512 tok drives the 2.4–3.4K-token prompt. Fewer chunks cut prompt-eval
+          linearly <em>and</em> shrink the KV the generator scans. Re-check answer quality after.</td>
+      <td><span class="tag post">SAFE</span> proportional gain</td>
+    </tr>
+    <tr>
+      <td><strong>Bound injected history</strong> — feed the model fewer than
+          <code>max_history_turns</code> (10) turns</td>
+      <td><a class="ref" href="../../src/services/rag.py">rag.py:239</a> /
+          <a class="ref" href="../../src/core/config.py">config.py:81</a></td>
+      <td>History is prepended verbatim, so the prompt (and prompt-eval time) grows every turn. Keeping
+          the store at 10 but injecting the last ~4 caps that growth.</td>
+      <td><span class="tag post">SAFE</span></td>
+    </tr>
+    <tr>
+      <td><strong>Right-size <code>num_ctx</code></strong> — 8192 → 6144, only if prompts fit</td>
+      <td><a class="ref" href="../../Modelfile">Modelfile:10</a> +
+          <a class="ref" href="../../src/services/llm.py">llm.py:30/63/89</a></td>
+      <td>A smaller context reserves a smaller KV cache (less VRAM, cheaper to scan). Measure real prompt
+          sizes first — 8192 was chosen deliberately so history isn't silently truncated.</td>
+      <td><span class="tag get">NEUTRAL</span> verify no truncation on any host</td>
+    </tr>
+    <tr>
+      <td><strong>Shrink the entity-extraction input</strong> — <code>text[:3000]</code> → <code>[:1500]</code></td>
+      <td><a class="ref" href="../../pipeline/extract.py">extract.py:94</a></td>
+      <td>The query is short; 3,000 chars of prompt for it is generous. Halving it trims the 2nd LLM
+          call's prompt-eval with no effect on the batch enrichment path's quality.</td>
+      <td><span class="tag post">SAFE</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note gotcha">
+  <strong>One tempting "optimization" that would hurt the iGPU</strong>
+  <p>
+    Running entity extraction <em>concurrently</em> with embedding looks like free parallelism, but on a
+    single shared iGPU the two calls fight over the same compute and memory bandwidth and both get
+    slower — while a discrete NVIDIA card would genuinely overlap them. Don't parallelize the query-time
+    LLM calls unless it's gated to non-iGPU hosts. Sequential is the right default here.
+  </p>
+</div>
+
+<h2>What the combined pass actually did — measured</h2>
+
+<p>
+  We ran the <em>same</em> question against the live models twice: once on the uncapped code, once with
+  the Family&nbsp;B changes applied (retrieval trimmed to 3+2, 700-token answer cap, 4-turn history). Same
+  host Ollama, same flash-attention-on config. These are real timing lines, not projections:
+</p>
+
+<figure>
+<svg viewBox="0 0 900 210" role="img" aria-label="Measured before and after latency">
+  <text x="16" y="26" class="d-m b">MEASURED — same query, uncapped vs. Family B applied</text>
+  <!-- scale 0..240s over x150..870 => 3px/s -->
+  <line x1="150" y1="180" x2="870" y2="180" class="d-line"/>
+  <text x="150" y="200" class="d-m xs d-c">0s</text>
+  <text x="330" y="200" class="d-m xs d-c">60s</text>
+  <text x="510" y="200" class="d-m xs d-c">120s</text>
+  <text x="690" y="200" class="d-m xs d-c">180s</text>
+  <text x="864" y="200" class="d-m xs d-e">240s</text>
+
+  <!-- before: 222s total. retrieval ~13s, prompt ~22s, gen ~186s -->
+  <text x="140" y="72" class="d-t sm d-e">uncapped</text>
+  <rect x="150" y="58" width="39" height="22" rx="3" class="d-violet"/><!-- retrieval 13s -->
+  <rect x="189" y="58" width="66" height="22" rx="3" class="d-amber"/><!-- prompt 22s, 2672tok -->
+  <rect x="255" y="58" width="558" height="22" rx="3" class="d-rose"/><!-- gen 186s, 1475tok -->
+  <text x="846" y="74" class="d-t sm b d-e" style="fill:var(--rose)">~222s</text>
+  <text x="255" y="52" class="d-m xs">1,475 answer tokens · 2,672 prompt tokens</text>
+
+  <!-- after: 91s total. retrieval ~8s(24px), prompt ~12s(36px), gen ~71s(213px) -->
+  <text x="140" y="128" class="d-t sm d-e">Family B</text>
+  <rect x="150" y="114" width="24" height="22" rx="3" class="d-violet"/>
+  <rect x="174" y="114" width="36" height="22" rx="3" class="d-amber"/>
+  <rect x="210" y="114" width="213" height="22" rx="3" class="d-green"/>
+  <text x="431" y="130" class="d-t sm b" style="fill:var(--green)">~91s (2.4× faster) — no model change</text>
+  <text x="210" y="108" class="d-m xs">597 answer tokens · 1,622 prompt tokens</text>
+
+  <text x="150" y="168" class="d-m xs">Colors: violet = retrieval (incl. entity call) · amber = prompt processing · rose/green = answer generation.</text>
+</svg>
+<figcaption>
+  The win is entirely <em>fewer tokens</em>: the cap cut the answer from 1,475 → 597 tokens (186&nbsp;s →
+  71&nbsp;s of generation), and trimming retrieval cut the prompt from 2,672 → 1,622 tokens (22&nbsp;s →
+  12&nbsp;s of processing). The generation <em>slope</em> never moved — it held at ~8&nbsp;tok/s throughout,
+  flash attention included. The one lever that would move that slope is a lighter model, which you've
+  deliberately deferred.
+</figcaption>
+</figure>
+
+<div class="note warn">
+  <strong>These app-code wins aren't live on the running stack yet</strong>
+  <p>
+    The <code>em_b_v2-api-1</code> container bind-mounts the <strong>main</strong> checkout
+    (<code>…/EM_B_V2/src</code>), not this worktree — so the 2.4× above was measured with a throwaway
+    container mounted on this branch. The Family&nbsp;B changes go live on the real stack only once this
+    branch is <strong>merged to main</strong> (uvicorn's <code>--reload</code> then picks them up). The
+    host env vars, by contrast, are already applied — they live in the Ollama daemon, not the repo.
+  </p>
+</div>
+
+<h2>Suggested order of operations</h2>
+
+<ol class="steps">
+  <li>
+    <strong>Cap the answer length first</strong> (<code>num_predict≈700</code> in llm.py). Biggest single
+    win, one-line change, no daemon restart. Re-run a query and read the <code>eval</code> token count.
+  </li>
+  <li>
+    <strong>Set the host env vars</strong> (<code>FLASH_ATTENTION=1</code>, <code>KV_CACHE_TYPE=q8_0</code>,
+    <code>NUM_PARALLEL=1</code>) in <code>REQUIRED</code> — <em>done</em>, and verified live on the Arc.
+    Expect no iGPU speedup (measured neutral), but the reload spikes are gone, KV memory halved, and
+    CUDA/Metal users get the flash-attention win for free.
+  </li>
+  <li>
+    <strong>Trim retrieval</strong> to <code>top_k=3</code>, <code>graph_limit=2</code>. Watch answer
+    quality on a few real questions; back off if citations thin out.
+  </li>
+  <li>
+    <strong>Bound injected history</strong> and, only if measured prompts fit, drop <code>num_ctx</code>
+    to 6144. Measure before committing.
+  </li>
+  <li>
+    <strong>Re-baseline.</strong> Only once these are exhausted does a model swap (a lighter/faster chat
+    model) become the next lever — and that's the boundary you set.
+  </li>
+</ol>
+
+<div class="note">
+  <strong>How to measure after each step</strong>
+  <p>
+    Fire one warm query and read the two log lines it emits:
+    <code>rag stages … retrieval_total=</code> and <code>ollama call=chat … eval=…tok/s total=</code>
+    (<a class="ref" href="../../src/core/timing.py">timing.py</a>). Change one thing at a time so each
+    line tells you what it bought.
+  </p>
+</div>
+
+<div class="pagenav">
+  <a href="deployment.html">← Deployment</a>
+  <a href="index.html">Overview →</a>
+</div>
+
+</main>
+</body>
+</html>

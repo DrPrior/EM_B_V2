@@ -144,13 +144,16 @@ All tuneable values are in `Settings` (pydantic-settings, reads from `.env`):
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `retrieval_top_k` | 5 | Vector results per query |
+| `retrieval_top_k` | 3 | Vector results per query |
+| `answer_max_tokens` | 700 | Cap (`num_predict`) on chat answer length — bounds the dominant generation-latency cost on GPU-limited hosts |
 | `vector_retrieval_min_score` | 0.75 | Floor for vector chunk inclusion |
 | `graph_retrieval_min_score` | 0.78 | Floor for graph chunk inclusion |
-| `graph_retrieval_limit` | 3 | Max graph-augmented chunks per query |
+| `graph_retrieval_limit` | 2 | Max graph-augmented chunks per query |
 | `chunk_max_tokens` | 512 | Ingestion chunk size (~4 chars/token) |
 | `chunk_overlap_tokens` | 64 | Overlap between consecutive chunks |
 | `max_history_turns` | 10 | Conversation turns retained per session |
+| `history_injection_turns` | 4 | Recent turns prepended to the LLM prompt — caps prompt (and prompt-eval) growth as a conversation runs long |
+| `chat_num_ctx` | 8192 | Context window (KV-cache size) requested for chat-model calls |
 | `rate_limit_per_minute` | 20 | Max chat requests per client IP per minute (429 over limit) |
 | `entity_extraction_max_tokens` | 256 | Token cap (`num_predict`) for the per-query entity-extraction LLM call |
 | `timing_log_enabled` | `True` | Master switch for per-stage query timing logs (`em_b.timing` logger) |

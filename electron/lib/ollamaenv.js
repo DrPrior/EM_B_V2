@@ -41,10 +41,26 @@ const loadOllama = () => require('./ollama');
 // The host env vars the desktop stack requires, with their target values. Keep
 // in sync with the "required host environment variables" table in
 // docs/HYBRID_SETUP.md.
+//
+// Three categories, all backend-agnostic (safe on CUDA/Metal/Vulkan alike):
+//   - connectivity: OLLAMA_HOST lets the Docker bridge reach the daemon.
+//   - warmth:       KEEP_ALIVE + MAX_LOADED_MODELS keep both models co-resident.
+//   - throughput:   FLASH_ATTENTION fuses attention over the KV cache (cutting
+//                   prompt-eval and the long-context generation sag);
+//                   KV_CACHE_TYPE=q8_0 halves KV memory (needs flash attention),
+//                   easing the shared-VRAM budget; NUM_PARALLEL=1 pins a single
+//                   context slot so a co-resident model isn't evicted for KV
+//                   room (the source of the 17-25s mid-session reload spikes).
+//                   NVIDIA/Metal gain the same speedups; a single-user app never
+//                   needed >1 parallel slot. Flash attention on Vulkan is a
+//                   no-op on builds that lack it, so it is safe to set blindly.
 const REQUIRED = Object.freeze({
   OLLAMA_HOST: '0.0.0.0',
   OLLAMA_KEEP_ALIVE: '-1',
   OLLAMA_MAX_LOADED_MODELS: '2',
+  OLLAMA_FLASH_ATTENTION: '1',
+  OLLAMA_KV_CACHE_TYPE: 'q8_0',
+  OLLAMA_NUM_PARALLEL: '1',
 });
 
 // Extra host vars that unlock an *integrated* Intel GPU (Arc iGPU / Iris Xe) via

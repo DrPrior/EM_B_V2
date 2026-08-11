@@ -22,6 +22,11 @@ Ollama stays **host-native** (not in Docker) so it uses the GPU. GPU
 acceleration is Ollama's job and auto-detected: CUDA (Nvidia), Vulkan (Intel
 Arc / iGPU — experimental), Metal (Apple Silicon), or CPU fallback.
 
+Machines with an NPU (Intel AI Boost on Meteor Lake/Lunar Lake/Arrow Lake,
+Apple's Neural Engine, etc.) have it **detected and reported, not used**:
+Ollama's inference backends have no NPU code path, so there is nothing to
+enable. See `lib/gpu.js`.
+
 ## Layout
 
 ```

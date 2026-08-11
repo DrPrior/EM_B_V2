@@ -57,6 +57,16 @@ These let the container talk to Ollama and keep both models resident in memory.
 | `OLLAMA_MAX_LOADED_MODELS` | `2` | Keep the 12B chat model and 4B embedding model co-resident; prevents Ollama from unloading one to make room for the other ("model thrashing"). |
 | `OLLAMA_IGPU_ENABLE` | `1` | **Intel integrated GPUs only** (Arc iGPU such as the Lunar Lake **Arc 140V**, or Iris Xe). Ollama enumerates the iGPU via Vulkan but then *drops* it by default (`server.log`: `dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1`) and silently falls back to CPU. This flips offload back on. **Do not set it on NVIDIA or Apple hosts** — it only affects integrated GPUs, so CUDA/Metal machines don't need it and the desktop wizard doesn't set it there. Pair with `OLLAMA_VULKAN=1` if your Ollama build doesn't enable Vulkan by default. |
 
+> ℹ️ **NPU (Intel AI Boost, Apple Neural Engine, etc.):** the desktop wizard's
+> GPU-detection step (`electron/lib/gpu.js`) also checks for an on-chip NPU and
+> reports it (e.g. "`Intel Arc … + NPU present (Intel(R) AI Boost) — not used`"),
+> but there is **no env var to set for it**. Stock Ollama's inference backends
+> (CUDA/ROCm/Metal/Vulkan) have no NPU code path — NPU-accelerated LLM
+> inference exists only in separate stacks this app doesn't integrate
+> (OpenVINO, ipex-llm's NPU mode). The Arc iGPU keeps doing the GPU work; the
+> NPU sits idle. If Ollama gains NPU support, wire the enable logic into
+> `resolveVars()` next to `INTEL_ACCEL` below.
+
 > ⚠️ **Security note:** `OLLAMA_HOST=0.0.0.0` exposes the **unauthenticated**
 > Ollama API on **all network interfaces**, not just localhost — anyone who can
 > reach this machine on port `11434` can use it. This is fine on a trusted dev

@@ -15,6 +15,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const supervisor = require('./supervisor');
 const paths = require('./lib/paths');
 const assets = require('./lib/assets');
+const docker = require('./lib/docker');
 const { runFirstRun, RebootRequiredError, loadManifest } = require('./lib/firstrun');
 const { ensureEnvFile } = require('./lib/envfile');
 
@@ -92,6 +93,40 @@ async function resolveAssetsDir(manifest) {
   return dir;
 }
 
+/**
+ * Ensure the API image for the *current* manifest version is loaded before the
+ * fast-path start.
+ *
+ * The subsequent-launch path (`quickStart`) brings the stack up with
+ * `emb-hybrid-api:${APP_VERSION}` but never loads an image — that only happens
+ * during first-run provisioning. When the app is updated in place (new bundled
+ * image version) the first-run marker still exists, so launches take the fast
+ * path, yet the new image was never loaded: `compose up` then references a tag
+ * that isn't present and the API container never starts, surfacing only as a
+ * health timeout. Detect that here and load the new image from the USB assets,
+ * prompting for the drive if it isn't mounted. Returns false (with a clear user
+ * message already sent) when the image is missing and can't be loaded.
+ */
+async function ensureImageForVersion(manifest) {
+  const tag = `emb-hybrid-api:${manifest.image.version}`;
+  if (await docker.imageExists(tag)) return true;
+
+  send('progress', { step: 'image', status: 'active',
+    message: `Loading the updated application image (${manifest.image.version})…` });
+  const assetsDir = await resolveAssetsDir(manifest);
+  if (!assetsDir) {
+    send('error', { message:
+      `This update (version ${manifest.image.version}) needs the USB drive to finish ` +
+      'installing. Plug it in and reopen the app.' });
+    return false;
+  }
+  const tar = assets.assetPath(assetsDir, manifest, 'image');
+  await assets.verify(tar, manifest.image.sha256);
+  await docker.loadImage(tar, (l) => send('progress', { step: 'image', status: 'active', message: l }));
+  send('progress', { step: 'image', status: 'done', message: 'Application image ready.' });
+  return true;
+}
+
 // Renderer asks what mode to show.
 ipcMain.handle('wizard:getState', () => ({
   firstRunComplete: supervisor.isFirstRunComplete(),
@@ -105,6 +140,10 @@ ipcMain.handle('wizard:begin', async () => {
     envPath = ensureEnvFile({ appVersion: version }).path;
 
     if (supervisor.isFirstRunComplete()) {
+      // An in-place update bumps the bundled image version but keeps the
+      // first-run marker, so make sure that version's image is actually loaded
+      // before the fast-path start tries to run it.
+      if (!(await ensureImageForVersion(loadManifest()))) return { ok: false, error: 'image-missing' };
       await supervisor.quickStart(envPath, (e) => send('progress', e));
     } else {
       const assetsDir = await resolveAssetsDir(loadManifest());

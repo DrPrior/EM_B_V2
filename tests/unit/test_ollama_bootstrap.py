@@ -103,6 +103,25 @@ def test_ensure_models_pulls_and_creates_when_absent() -> None:
         assert "modelfile" not in body
 
 
+def test_ensure_models_raises_on_error_body_with_http_200() -> None:
+    # Ollama reports a failed pull as {"error": ...} with HTTP 200; that must
+    # surface as a failure, not be swallowed as success.
+    tags_resp = MagicMock()
+    tags_resp.raise_for_status.return_value = None
+    tags_resp.json.return_value = {"models": []}  # cold host
+
+    err_resp = MagicMock()
+    err_resp.raise_for_status.return_value = None  # HTTP 200
+    err_resp.json.return_value = {"error": "pull model manifest: connection refused"}
+
+    with (
+        patch.object(ollama_bootstrap.requests, "get", return_value=tags_resp),
+        patch.object(ollama_bootstrap.requests, "post", return_value=err_resp),
+    ):
+        with pytest.raises(OllamaUnavailableError, match="connection refused"):
+            ensure_models()
+
+
 def test_parse_modelfile_extracts_system_and_typed_parameters() -> None:
     modelfile = (
         "FROM gemma4:12b-it-qat\n"

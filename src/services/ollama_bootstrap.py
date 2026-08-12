@@ -119,6 +119,23 @@ def _is_present(name: str, tags: set[str]) -> bool:
     return name in tags or f"{name}:latest" in tags
 
 
+def _raise_on_body_error(resp: requests.Response, context: str) -> None:
+    """Raise if Ollama signalled a failure in the response body.
+
+    ``/api/pull`` and ``/api/create`` report failures (unreachable registry,
+    unknown model, out of disk) as ``{"error": "..."}`` in the body with an
+    HTTP **200**, so ``raise_for_status`` alone lets them pass as success. Parse
+    the body and surface any ``error`` field as an :class:`OllamaUnavailableError`
+    rather than swallowing it.
+    """
+    try:
+        body = resp.json()
+    except ValueError:
+        return  # non-JSON body (e.g. empty) — nothing to inspect
+    if isinstance(body, dict) and body.get("error"):
+        raise OllamaUnavailableError(f"{context}: {body['error']}")
+
+
 def _pull_base(model: str) -> None:
     """Pull a base model onto the host if it isn't already present.
 
@@ -133,6 +150,7 @@ def _pull_base(model: str) -> None:
         timeout=settings.ollama_pull_timeout,
     )
     resp.raise_for_status()
+    _raise_on_body_error(resp, f"pulling base model '{model}'")
     logger.info("Base model '%s' is present on host.", model)
 
 
@@ -242,6 +260,7 @@ def _create_variant(name: str, base: str, modelfile_path: Path) -> None:
     url = f"{settings.ollama_base_url}/api/create"
     resp = requests.post(url, json=payload, timeout=settings.ollama_pull_timeout)
     resp.raise_for_status()
+    _raise_on_body_error(resp, f"creating variant '{name}'")
     logger.info("Custom variant '%s' built on host.", name)
 
 

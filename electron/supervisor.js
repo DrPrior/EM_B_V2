@@ -47,6 +47,26 @@ async function waitForHealth(retries = 60, delayMs = 2000) {
   return false;
 }
 
+/**
+ * Build the error thrown when the API never reports healthy.
+ *
+ * `/health` is gated behind the FastAPI lifespan, which fails fast on any
+ * startup dependency — Neo4j unreachable or auth-mismatched, or host Ollama
+ * unreachable from the container (host.docker.internal:11434 blocked by the
+ * firewall, or OLLAMA_HOST=0.0.0.0 not applied to the running daemon). That real
+ * cause is in the API container log, not in `compose up -d` output, so append
+ * its tail here rather than leaving the user with an opaque timeout.
+ */
+async function healthTimeoutError(envPath) {
+  let detail = '';
+  try {
+    const out = await compose.logs(envPath, 'api', 40);
+    const tail = out.split('\n').map((l) => l.trim()).filter(Boolean).slice(-12).join('\n');
+    if (tail) detail = `\n\nThe API container reported:\n${tail}`;
+  } catch { /* diagnostics are best-effort */ }
+  return new Error(`The API did not become healthy in time.${detail}`);
+}
+
 /** Start the stack (idempotent — compose up -d) and wait until healthy. */
 async function start(envPath, onLine = () => {}) {
   await compose.up(envPath, onLine);
@@ -99,8 +119,8 @@ async function quickStart(envPath, emit = () => {}) {
     emit({ step: 'start', status: 'active', message: `Skipping graph restore: ${err.message}` });
   }
   const healthy = await start(envPath, () => {});
-  if (!healthy) throw new Error('The API did not become healthy in time.');
+  if (!healthy) throw await healthTimeoutError(envPath);
   emit({ step: 'start', status: 'done', message: 'Ready.' });
 }
 
-module.exports = { isFirstRunComplete, checkHealth, waitForHealth, start, stop, quickStart };
+module.exports = { isFirstRunComplete, checkHealth, waitForHealth, healthTimeoutError, start, stop, quickStart };

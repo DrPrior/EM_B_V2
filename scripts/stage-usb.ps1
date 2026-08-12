@@ -152,7 +152,12 @@ foreach ($key in $assetKeys) {
 
 # ── 5. Copy the layout ──────────────────────────────────────────────────────
 Write-Host "==> Staging to $Destination ..." -ForegroundColor Cyan
-New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+# A drive root (e.g. D:\ / E:\) already exists and cannot be created with
+# New-Item ("path is not of a legal form" on Windows PowerShell), so only create
+# the destination when it's a subfolder that doesn't exist yet.
+if (-not (Test-Path -LiteralPath $Destination)) {
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+}
 
 Copy-Item $installer.FullName (Join-Path $Destination $installer.Name) -Force
 Copy-Item $readmeSrc (Join-Path $Destination "README.txt") -Force

@@ -60,8 +60,12 @@ electron/dist/
 !electron/build/**
 # Release assets produced by electron/scripts/build-release.ps1
 release/
-# Assembled USB drive layout produced by scripts/stage-usb.ps1
-usb-staging/
+# Assembled USB drive layout produced by scripts/stage-usb.ps1 — regenerable
+# build artifacts (installer .exe, api/data tarballs, neo4j.dump). Never commit;
+# they blow past GitHub's 100 MB file limit. Share out-of-band or via Git LFS.
+usb-staging
+# ...and the packaged zip of that layout.
+usb-staging.zip
 
 
 #test outputs and logs

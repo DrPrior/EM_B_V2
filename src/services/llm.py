@@ -34,6 +34,12 @@ def generate_response(
         "model": settings.chat_model,
         "prompt": prompt,
         "stream": False,
+        # chat-model (gemma4) is a reasoning model: left on, it emits its
+        # chain-of-thought into a separate `thinking` channel and can consume the
+        # entire num_predict budget before producing any real output. We never use
+        # the reasoning tokens, so disable thinking — this keeps `response`
+        # populated and cuts latency.
+        "think": False,
         "options": options,
     }
     if format_json:
@@ -60,6 +66,10 @@ def generate_chat_response(messages: list[dict], session_id: str | None = None) 
         "model": settings.chat_model,
         "messages": messages,
         "stream": False,
+        # Disable the model's reasoning channel: with thinking on, gemma4 spends
+        # the num_predict budget on `message.thinking` and returns an empty
+        # `message.content` (done_reason=length), which surfaces as a blank answer.
+        "think": False,
         "options": {
             "temperature": 0.3,
             "num_ctx": settings.chat_num_ctx,
@@ -90,6 +100,10 @@ def generate_chat_stream(
         "model": settings.chat_model,
         "messages": messages,
         "stream": True,
+        # See generate_chat_response: thinking must be off or the streamed
+        # `message.content` tokens never arrive (they go to `thinking`), leaving
+        # the UI with no visible response.
+        "think": False,
         "options": {
             "temperature": 0.3,
             "num_ctx": settings.chat_num_ctx,

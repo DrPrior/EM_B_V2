@@ -26,6 +26,9 @@ def test_generate_response_returns_text() -> None:
     _, kwargs = p.call_args
     assert kwargs["json"]["prompt"] == "a prompt"
     assert kwargs["json"]["stream"] is False
+    # Thinking must be disabled: chat-model (gemma4) otherwise spends the
+    # num_predict budget on a `thinking` channel and returns empty output.
+    assert kwargs["json"]["think"] is False
 
 
 def test_generate_response_propagates_http_error() -> None:
@@ -49,6 +52,9 @@ def test_generate_chat_response_extracts_message_content() -> None:
     assert result == "hello"
     _, kwargs = p.call_args
     assert kwargs["json"]["messages"] == messages
+    # Reasoning off so `message.content` is populated (not left empty while the
+    # budget is spent in `message.thinking`).
+    assert kwargs["json"]["think"] is False
 
 
 def test_generate_chat_response_missing_content_returns_empty() -> None:
@@ -74,8 +80,11 @@ def test_generate_chat_stream_yields_tokens_until_done() -> None:
     mock_response.__enter__.return_value = mock_response
     mock_response.__exit__.return_value = False
 
-    with patch("src.services.llm.requests.post", return_value=mock_response):
+    with patch("src.services.llm.requests.post", return_value=mock_response) as p:
         tokens = list(generate_chat_stream([{"role": "user", "content": "hi"}]))
 
     # Stops at the done=true chunk; the trailing chunk is never yielded.
     assert tokens == ["Hel", "lo", "!"]
+    # Reasoning off so streamed `message.content` tokens actually arrive.
+    _, kwargs = p.call_args
+    assert kwargs["json"]["think"] is False

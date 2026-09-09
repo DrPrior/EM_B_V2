@@ -1,14 +1,31 @@
 # EM Knowledge Assistant — Desktop app
 
-Electron wrapper that turns the EM_B_Hybrid stack into a one-click desktop app
-for **Windows** and **macOS**. It is a *supervisor + first-run installer* around
-the existing Docker stack — the FastAPI backend and its container internals are
-unchanged. Electron:
+> ## ⚠️ Decontainerization in progress
+>
+> **Docker is being removed** — see [`../docs/DECONTAINERIZE_PLAN.md`](../docs/DECONTAINERIZE_PLAN.md)
+> (Workstream D covers this Electron rewrite). The **target** supervisor spawns
+> **native** Neo4j (bundled JRE) + the API (frozen exe or venv) and ensures
+> host-native Ollama — no Docker detection, no `docker load`, no compose. The
+> `electron/lib/docker.js` + `compose.js` orchestration and the first-run
+> `docker`/`image` steps go away; `snapshot.js` keeps `neo4j-admin database load`
+> but against native Neo4j.
+>
+> **This document still describes the CURRENT (Docker-based) desktop app** — no
+> refactor code has landed yet. Treat the Docker mechanics below as legacy that
+> is slated for removal, not as the go-forward design.
 
-1. On **first run**, guides the user through provisioning: Docker Desktop →
-   Ollama → language models (~10 GB) → the prebuilt API image → the source
-   corpus → the knowledge-graph snapshot → starting the stack.
-2. On **later runs**, waits for Docker + Ollama and brings the stack up.
+Electron wrapper that turns the EM_B_Hybrid stack into a one-click desktop app
+for **Windows** and **macOS**. It is a *supervisor + first-run installer*. In the
+**native target** it supervises native Neo4j + API processes; in the **current
+(legacy)** build it supervises the Docker stack, with the FastAPI backend's
+container internals unchanged. Electron:
+
+1. On **first run**, guides the user through provisioning. *Current (legacy):*
+   Docker Desktop → Ollama → language models (~10 GB) → the prebuilt API image →
+   the source corpus → the knowledge-graph snapshot → starting the stack.
+   *Target (native):* Ollama → models → native Neo4j → Python runtime → corpus →
+   snapshot → start (no Docker, no image step).
+2. On **later runs**, waits for its dependencies and brings the app up.
 3. Loads the existing web UI at `http://127.0.0.1:8000` in its window.
 
 **Delivery: USB drive, no download server.** The three heavy *custom* assets

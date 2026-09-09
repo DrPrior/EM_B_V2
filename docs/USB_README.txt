@@ -3,6 +3,14 @@
  Version 0.2.0 (Windows)
 ================================================================================
 
+ *** MAINTAINER NOTE — NOT FOR THE CURRENT BUILD ***
+ The app is being decontainerized (Docker removed). This end-user README still
+ describes the CURRENT Docker-based build. When the native build ships, update
+ it: remove the Docker step and the "Application image" step from the setup
+ sequence, and drop the "Docker Desktop ... start automatically" line under
+ AFTER SETUP. See docs/DECONTAINERIZE_PLAN.md. (Delete this note before shipping.)
+================================================================================
+
 WHAT THIS IS
 ------------
 A private knowledge assistant that runs entirely on your own computer. Your

@@ -2,30 +2,43 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> ## ⚠️ Decontainerization in progress — read this first
+>
+> **Docker is being removed.** The organization (UALR) no longer permits Docker,
+> so Neo4j and the FastAPI API are moving from containers to **native host
+> processes**. Ollama was already host-native and does not change. The target is
+> **no container runtime at all** — every service on `127.0.0.1`.
+>
+> - **Canonical plan + pitfalls:** [`docs/DECONTAINERIZE_PLAN.md`](docs/DECONTAINERIZE_PLAN.md). Read it before doing migration work.
+> - **Current reality:** no refactor code has landed yet (branch `Decontainerize`). The Docker stack below still runs the app today. Sections marked **TARGET** describe the native end state; **LEGACY (current)** blocks are what actually works right now.
+> - **Do not add new Docker coupling.** New work should assume the native target (localhost endpoints, no `host.docker.internal`, no compose).
+
 ## Stack
 
-- **FastAPI** app served by uvicorn, running inside Docker (`em_b_v2-api-1`)
-- **Neo4j** graph database — bolt on port 7687, browser on port 7474
-- **Ollama** — local LLM inference. **Hybrid architecture: Ollama runs natively on the host, NOT in Docker** (so it uses the host GPU — Metal/CUDA/Vulkan — directly). The API container reaches it at `http://host.docker.internal:11434`. The app calls custom Modelfile-built variants, not the base models directly: `chat-model` (FROM `gemma4:12b-it-qat`, `num_ctx 8192`) for chat/entity extraction, `embedding-model` (FROM `qwen3-embedding:4b`, 2560-dim) for embeddings. Variant names are set in `src/core/config.py`. The variants are pulled/built on the host automatically at API startup by `src/services/ollama_bootstrap.py` over the HTTP bridge — see **`docs/HYBRID_SETUP.md`** for the one-time host setup (install Ollama, set `OLLAMA_HOST=0.0.0.0`)
+**TARGET (native):**
+- **FastAPI** app served by uvicorn as a **native process** (frozen exe or a venv) on `127.0.0.1:8000`
+- **Neo4j** graph database — **native server** (bundled JRE), bolt on `127.0.0.1:7687`, browser on `127.0.0.1:7474`
+- **Ollama** — local LLM inference, **native on the host** (uses the host GPU — Metal/CUDA/Vulkan — directly), on `127.0.0.1:11434`. Because the API is also native, it reaches Ollama over plain `localhost` (no `host.docker.internal`, no `OLLAMA_HOST=0.0.0.0`). The app calls custom Modelfile-built variants, not the base models directly: `chat-model` (FROM `gemma4:12b-it-qat`, `num_ctx 8192`) for chat/entity extraction, `embedding-model` (FROM `qwen3-embedding:4b`, 2560-dim) for embeddings. Variant names are set in `src/core/config.py`. The variants are pulled/built on the host automatically at API startup by `src/services/ollama_bootstrap.py` over HTTP.
 - **Static web UI** — chat interface served at `/` from `src/static/` (index.html, app.js, style.css)
-- Only **Neo4j** and the **API** are declared in `docker-compose.yml`; Ollama must be installed and running on the host. All three must be up for the app to function
+- Neo4j, the API, and Ollama must all be up for the app to function. On the desktop app, the Electron shell supervises the native Neo4j + API processes and ensures Ollama is running.
+
+**LEGACY (current):** FastAPI + Neo4j run in Docker (`docker-compose.yml`); the API container reaches host Ollama at `http://host.docker.internal:11434`. This is what runs until the migration lands.
 
 ## Common Commands
 
-**Start the stack** (Ollama must already be running natively on the host — see `docs/HYBRID_SETUP.md`):
+> **TARGET (native) commands.** These assume the native dev setup described in
+> [`docs/DECONTAINERIZE_PLAN.md`](docs/DECONTAINERIZE_PLAN.md) → Workstream B
+> (native Neo4j running, deps installed in your conda/venv). The native launch
+> script (`scripts/dev-up.ps1`) does **not exist yet** — until it does, use the
+> LEGACY block below.
+
+**Start the API** (Neo4j + Ollama already running on the host):
 ```
-docker compose up -d
+uvicorn src.main:app --reload
 ```
-On startup the API waits for host Ollama, then pulls base models and builds the
-custom variants if missing (fail-fast: it exits if Ollama is unreachable). To
-re-provision models without restarting the container:
+On startup the API verifies Neo4j, waits for Ollama, then pulls base models and builds the custom variants if missing (fail-fast: it exits if Ollama is unreachable). Re-provision models without restarting:
 ```
 curl.exe -s -X POST http://localhost:8000/admin/bootstrap-models
-```
-
-**Tail API logs (hot-reload is active; file saves apply instantly):**
-```
-docker logs -f em_b_v2-api-1
 ```
 
 **Trigger ingestion** (after dropping the database or adding new files):
@@ -33,47 +46,37 @@ docker logs -f em_b_v2-api-1
 curl.exe -s -X POST http://localhost:8000/admin/ingest | python -m json.tool
 ```
 
-**Load manifest metadata** (after ingestion, before enrichment):
+**Full rebuild order** (drop graph → ingest → load manifest → enrich), run in your venv:
 ```
-docker exec -it em_b_v2-api-1 python -m pipeline.load_manifest
-```
-
-**Run enrichment** (after manifest load completes):
-```
-docker exec -it em_b_v2-api-1 python -m pipeline.enrich
-```
-
-**Full rebuild order** (drop graph → ingest → load manifest → enrich):
-```
-docker exec -it em_b_v2-api-1 python -m pipeline.ingest
-docker exec -it em_b_v2-api-1 python -m pipeline.load_manifest
-docker exec -it em_b_v2-api-1 python -m pipeline.enrich
+python -m pipeline.ingest
+python -m pipeline.load_manifest
+python -m pipeline.enrich
 ```
 `load_manifest` must run **after** `ingest` so its filename-based matching finds
 the ingested File nodes. Run earlier and manifest rows whose category column
 doesn't match an on-disk folder (most of MANIFEST2.md) create duplicate catalog
 nodes at synthetic paths.
 
-**Run tests** (inside the container):
-```
-docker exec em_b_v2-api-1 pytest
-```
-
-**Run a single test file:**
-```
-docker exec em_b_v2-api-1 pytest tests/test_rag.py -v
-```
-
-**Run tests by marker:**
-```
-docker exec em_b_v2-api-1 pytest -m unit
-```
+**Run tests** (in the venv): `pytest` — single file: `pytest tests/test_rag.py -v` — by marker: `pytest -m unit`
 
 **Reset the graph** (drop all Chunk nodes before re-ingesting):
 ```cypher
 MATCH (c:Chunk) DETACH DELETE c
 ```
 Run in Neo4j Browser at `http://localhost:7474`. Preserves Directory, File, and entity nodes.
+
+<details>
+<summary><strong>LEGACY (current) Docker commands — still the working path until the refactor lands</strong></summary>
+
+```
+docker compose up -d                                         # start the stack (Ollama must be native)
+docker logs -f em_b_v2-api-1                                 # tail API logs (hot-reload active)
+docker exec -it em_b_v2-api-1 python -m pipeline.ingest      # pipeline steps run inside the container
+docker exec -it em_b_v2-api-1 python -m pipeline.load_manifest
+docker exec -it em_b_v2-api-1 python -m pipeline.enrich
+docker exec em_b_v2-api-1 pytest                             # tests inside the container
+```
+</details>
 
 ## Architecture
 
@@ -87,9 +90,9 @@ pipeline/enrich.py         →  reads Chunk nodes, calls LLM, creates Concept/Or
                               LegalReference/Course nodes and MaterialType classification
 ```
 
-Ingestion is idempotent — `is_file_embedded()` skips files that already have chunks with stored embeddings. Manifest load is idempotent — every write is a MERGE, keyed on the File's `filepath`. Enrichment is idempotent — already-enriched chunks (`c.enriched = true`) and already-typed documents are skipped. Ingestion and enrichment require the host-native Ollama to be running and reachable at `host.docker.internal:11434`; the manifest load does not (no LLM calls).
+Ingestion is idempotent — `is_file_embedded()` skips files that already have chunks with stored embeddings. Manifest load is idempotent — every write is a MERGE, keyed on the File's `filepath`. Enrichment is idempotent — already-enriched chunks (`c.enriched = true`) and already-typed documents are skipped. Ingestion and enrichment require host-native Ollama to be running and reachable at the configured `ollama_base_url` (`http://localhost:11434` natively; `host.docker.internal:11434` under the legacy Docker stack); the manifest load does not (no LLM calls).
 
-`pipeline/load_manifest.py` uses **hybrid** resolution: each manifest row is matched to existing File nodes by filename; if none exist, a catalog File node is created keyed on the synthetic path `{data_root}/{category}/{filename}`. The synthetic root is `/app/project_data` (the container ingestion root) so a later real ingestion merges into the same node. It must run after `ingest.py` (see "Full rebuild order" above). After loading rows it also creates the **curated** `SUPERSEDES`/`VARIANT_OF` file-to-file edges from `SUPERSEDES_EDGES` and `VARIANT_GROUPS` (extracted by hand from the manifest prose, matched by filename — update these lists when documents are superseded or duplicated).
+`pipeline/load_manifest.py` uses **hybrid** resolution: each manifest row is matched to existing File nodes by filename; if none exist, a catalog File node is created keyed on the synthetic path `{data_root}/{category}/{filename}`. The synthetic root is the configured `data_root` (the ingestion root — `/app/project_data` under Docker today, a host path once native) so a later real ingestion merges into the same node. It must run after `ingest.py` (see "Full rebuild order" above). After loading rows it also creates the **curated** `SUPERSEDES`/`VARIANT_OF` file-to-file edges from `SUPERSEDES_EDGES` and `VARIANT_GROUPS` (extracted by hand from the manifest prose, matched by filename — update these lists when documents are superseded or duplicated).
 
 `pipeline/extract.py` is not a standalone pipeline — it is a shared library called by both `enrich.py` (batch) and `rag.py` (per query, for entity extraction at query time).
 
@@ -117,7 +120,7 @@ WhyItMatters -[:RELATES_TO]->  Concept
 
 The `File` node was formerly `Document`. The `Category`/`Source`/`Edition`/`WhyItMatters`/`Validated` nodes and their relationships are populated by `pipeline/load_manifest.py`, not by ingestion or enrichment.
 
-All Cypher queries live in `src/database/schema.py` as module-level string constants. Never build Cypher by string interpolation — always use `$param` placeholders.
+All Cypher queries live in `src/database/schema.py` as module-level string constants. Never build Cypher by string interpolation — always use `$param` placeholders. The vector features used (`db.index.vector.queryNodes`, `vector.similarity.cosine`) are Neo4j **core** — no APOC/GDS plugin is required, so native Neo4j works with no extra install.
 
 ### RAG pipeline (`src/services/rag.py`)
 
@@ -140,7 +143,7 @@ In-memory conversation store keyed by UUID. Thread-safe via `threading.Lock`. Hi
 
 ### Configuration (`src/core/config.py`)
 
-All tuneable values are in `Settings` (pydantic-settings, reads from `.env`):
+All tuneable values are in `Settings` (pydantic-settings, reads from `.env`). Connection settings relevant to decontainerization: `ollama_base_url` (defaults to `http://localhost:11434` — the native value; the legacy Docker stack overrides it to `host.docker.internal`), and `data_root` (defaults to `/app/project_data` — the container path; set to a host path when running native). `DB_URI` is read from the environment by `src/database/connection.py` (`bolt://neo4j:7687` under Docker; `bolt://127.0.0.1:7687` native).
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -168,7 +171,7 @@ models stay warm (low `load=` ms) under `OLLAMA_KEEP_ALIVE`.
 
 ### Hot reload
 
-`docker-compose.yml` mounts `./src`, `./pipeline`, `./project_data`, `./tests`, and the two Modelfiles into the container. Uvicorn runs with `--reload`. Saving any Python file under `src/` or `pipeline/` restarts the app within seconds — no container restart needed. (On reload the startup bootstrap re-runs but is idempotent — the warm path is a single `/api/tags` read.)
+Native: run `uvicorn src.main:app --reload` from the repo — saving any Python file under `src/` or `pipeline/` restarts the app within seconds. (On reload the startup bootstrap re-runs but is idempotent — the warm path is a single `/api/tags` read.) **LEGACY:** `docker-compose.yml` mounted `./src`, `./pipeline`, `./project_data`, `./tests`, and the Modelfiles into the container and ran uvicorn with `--reload` for the same effect.
 
 ### API surface
 
@@ -176,8 +179,8 @@ models stay warm (low `load=` ms) under `OLLAMA_KEEP_ALIVE`.
 - `POST /chat/stream` — SSE stream: `metadata` event (session_id + sources), then `token` events, then `done`
 - `GET /chat/sessions/{id}/history` — retrieve conversation history
 - `DELETE /chat/sessions/{id}` — clear a session
-- `POST /admin/ingest` — trigger ingestion pipeline on demand (body: `{"data_root": "/app/project_data"}`)
-- `POST /admin/load-manifest` — load MANIFEST*.md metadata into the graph (run after ingest; body: `{"data_root": "/app/project_data"}`)
+- `POST /admin/ingest` — trigger ingestion pipeline on demand (body: `{"data_root": "..."}`)
+- `POST /admin/load-manifest` — load MANIFEST*.md metadata into the graph (run after ingest; body: `{"data_root": "..."}`)
 - `POST /admin/bootstrap-models` — re-provision the host-native Ollama models (pull base + build custom variants) without restarting the API; idempotent
 - `GET /health` — liveness check
 - `GET /graph/nodes` — list up to 10 graph nodes
@@ -194,7 +197,7 @@ These conventions are enforced across the codebase. Follow them in all new code.
 ### Python
 
 - **Type hints:** Always annotate function arguments and return types using modern Python syntax (`list[str]` not `List[str]`)
-- **Dependency management:** `uv` inside the Docker image (the base image ships with it). For **local development**, install into your conda env with plain pip — `python -m pip install -r requirements-dev.txt`. Don't run `uv pip install` against a conda env; uv treats it as a system Python and refuses unless pointed at it explicitly (`uv pip install --python "$env:CONDA_PREFIX\python.exe" ...`).
+- **Dependency management:** For **local/native development**, install into your conda env with plain pip — `python -m pip install -r requirements-dev.txt`. Don't run `uv pip install` against a conda env; uv treats it as a system Python and refuses unless pointed at it explicitly (`uv pip install --python "$env:CONDA_PREFIX\python.exe" ...`). (The legacy Docker image used `uv` internally; that goes away with the image.)
 - **Formatting & linting:** Ruff (line length 88) — `ruff format` for formatting (Black-compatible) and `ruff check` for linting. Config lives in `pyproject.toml`; dev tooling is pinned in `requirements-dev.txt`.
 - **Docstrings:** Google-style for all classes, modules, and public functions
 - **String formatting:** f-strings exclusively — no `.format()` or `%`
@@ -223,13 +226,15 @@ These conventions are enforced across the codebase. Follow them in all new code.
 - **Never** use f-strings or string interpolation to build Cypher — always `$param` placeholders
 - Use `session.execute_read()` / `session.execute_write()` — not auto-commit transactions
 - Map Neo4j records to Pydantic models before returning from endpoints
+- Connect at the env-provided `DB_URI` — `bolt://127.0.0.1:7687` native, `bolt://neo4j:7687` under the legacy Docker stack. Never hardcode a host.
 
-### Docker
+### Deployment / process model (native TARGET)
 
-- Base image: Astral uv Python "slim" (`astral/uv:python3.12-bookworm-slim`) — avoid Alpine
-- FastAPI connects to Neo4j at `bolt://neo4j:7687` — never `localhost`
-- FastAPI connects to Ollama at `http://host.docker.internal:11434` (the host-native daemon) — set via `OLLAMA_BASE_URL`. The `api` service declares `extra_hosts: ["host.docker.internal:host-gateway"]` for Linux portability
-- All credentials via `.env` / environment directives — never hardcoded secrets
-- Neo4j has a `healthcheck`; the API service uses `depends_on` with `condition: service_healthy` for Neo4j only (Ollama is host-native, outside Docker's `depends_on` — the app's startup bootstrap waits for it instead)
-- The custom variants are built on the host at API startup by `src/services/ollama_bootstrap.py`: it waits for host Ollama, pulls `gemma4:12b-it-qat` / `qwen3-embedding:4b`, then creates `chat-model` from `Modelfile` and `embedding-model` from `Modelfile.embeddings` over the HTTP API (idempotent — skips models already present)
-- GPU acceleration comes from the **host's** native Ollama install (Metal/CUDA/Vulkan), not from Docker device reservations. See `docs/HYBRID_SETUP.md`
+- The app runs as native processes, supervised by the Electron shell on the desktop: Neo4j (native server + bundled JRE) → wait for bolt → API (uvicorn, frozen exe or venv) → poll `/health`. Ollama is host-native and ensured-running by the shell.
+- All endpoints bind `127.0.0.1` only. The API reaches Ollama over `http://localhost:11434` — no `host.docker.internal`, and Ollama does **not** need `OLLAMA_HOST=0.0.0.0` (that requirement existed only because the API was containerized).
+- The custom variants are built at API startup by `src/services/ollama_bootstrap.py`: it waits for host Ollama, pulls `gemma4:12b-it-qat` / `qwen3-embedding:4b`, then creates `chat-model` from `Modelfile` and `embedding-model` from `Modelfile.embeddings` over the HTTP API (idempotent — skips models already present).
+- GPU acceleration comes from the host's native Ollama install (Metal/CUDA/Vulkan). The app has no GPU code of its own.
+- **Shipping the runtimes (OPEN decision):** recommended — freeze the API with PyInstaller (one-dir) and code-sign it; ship native Neo4j + a bundled JRE unpacked. See [`docs/DECONTAINERIZE_PLAN.md`](docs/DECONTAINERIZE_PLAN.md) for alternatives and the full pitfall list (freezing `unstructured`, Neo4j store-format version lock to 2026.04.0, set Neo4j password before first init, IT unsigned-installer block, process supervision you now own).
+- All credentials via `.env` / environment — never hardcoded secrets.
+
+> **LEGACY Docker notes (being removed):** base image `astral/uv:python3.12-bookworm-slim`; API→Neo4j at `bolt://neo4j:7687`; API→Ollama at `host.docker.internal:11434` with `extra_hosts: ["host.docker.internal:host-gateway"]`; Neo4j `healthcheck` + `depends_on: condition: service_healthy`. See `docker-compose.yml`, `docker-compose.desktop.yml`, `Dockerfile`, `Dockerfile.prod` — all slated for removal per the plan.

@@ -1,5 +1,20 @@
 # Target Machine Prep
 
+> ## ⚠️ Decontainerization in progress
+>
+> **Docker is being removed** — see [`DECONTAINERIZE_PLAN.md`](DECONTAINERIZE_PLAN.md).
+> Once migrated, this prep changes:
+> - **Step 1 (Docker Desktop) is dropped entirely** — no container runtime.
+> - **Step 3 drops `OLLAMA_HOST=0.0.0.0`** — the native API reaches Ollama on
+>   `127.0.0.1`, so the LAN-exposure/firewall concern disappears.
+>   `OLLAMA_KEEP_ALIVE=-1` and `OLLAMA_MAX_LOADED_MODELS=2` stay (warmth).
+> - "What the app does on first run" loses the `docker load` and `docker compose`
+>   steps; Neo4j runs native.
+>
+> **No refactor code has landed yet** — the steps below match the current
+> Docker-based build. Ollama install (step 2) and base-model pull (step 4) stay
+> valid either way.
+
 What to do on each machine **before** handing over the USB drive. Doing this
 first is not just a time-saver — it is what keeps the app's first run quiet
 enough to survive managed-endpoint security. Budget 20–40 minutes per machine,

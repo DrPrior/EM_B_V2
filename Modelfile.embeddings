@@ -1,6 +1,5 @@
 # Base model (from Ollama library or local)
-FROM qwen3-embedding:4b
+FROM embeddinggemma:latest
 
 # Optional: Override parameters specific to embeddings
-PARAMETER temperature 0
 PARAMETER num_gpu 999

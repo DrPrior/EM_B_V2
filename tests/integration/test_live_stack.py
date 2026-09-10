@@ -57,7 +57,7 @@ def test_embedding_dimensions_live() -> None:
     vector = generate_embedding("emergency management principles")
 
     assert isinstance(vector, list)
-    assert len(vector) == 2560  # qwen3-embedding:4b
+    assert len(vector) == 768  # embeddinggemma
     assert all(isinstance(x, float) for x in vector[:10])
 
 

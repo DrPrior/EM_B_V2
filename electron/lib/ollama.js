@@ -24,7 +24,7 @@ const PORT = 11434;
 // Must match src/core/config.py.
 const VARIANTS = [
   { variant: 'chat-model', base: 'gemma4:12b-it-qat', modelfile: 'Modelfile' },
-  { variant: 'embedding-model', base: 'qwen3-embedding:4b', modelfile: 'Modelfile.embeddings' },
+  { variant: 'embedding-model', base: 'embeddinggemma:latest', modelfile: 'Modelfile.embeddings' },
 ];
 
 // Fallback installer URLs (overridable via assets.manifest.json → ollama).

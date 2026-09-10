@@ -80,12 +80,12 @@ CREATE CONSTRAINT unique_access_level IF NOT EXISTS
 FOR (a:Access) REQUIRE a.level IS UNIQUE;
 """
 
-# Add a vector index for chunk embeddings (dimensions match qwen3-embedding:4b: 2560)
+# Add a vector index for chunk embeddings (dimensions match embeddinggemma: 768)
 INDEX_VECTOR_CHUNK = """
 CREATE VECTOR INDEX chunk_vector_idx IF NOT EXISTS
 FOR (c:Chunk) ON (c.embedding)
 OPTIONS {indexConfig: {
-  `vector.dimensions`: 2560,
+  `vector.dimensions`: 768,
   `vector.similarity_function`: 'cosine'
 }}
 """

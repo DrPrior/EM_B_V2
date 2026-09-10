@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         default="embedding-model",
         description=(
             "Embedding model name for Ollama — the custom variant built from "
-            "Modelfile.embeddings by the startup bootstrap (FROM qwen3-embedding:4b)"
+            "Modelfile.embeddings by the startup bootstrap (FROM embeddinggemma:latest)"
         ),
     )
     chat_base_model: str = Field(
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
         ),
     )
     embedding_base_model: str = Field(
-        default="qwen3-embedding:4b",
+        default="embeddinggemma:latest",
         description=(
             "Base model the embedding-model variant is built FROM. The startup "
             "bootstrap pulls this onto the host before creating embedding-model. "

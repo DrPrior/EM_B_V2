@@ -191,7 +191,7 @@
   <strong>One text-search subtlety</strong>
   <p>
     <code>GET /graph/search</code> uses <code>toStringOrNull</code> rather than <code>toString</code>
-    (<a class="ref" href="../../src/routers/graph.py">graph.py:237</a>). Chunk nodes carry a 2560-element
+    (<a class="ref" href="../../src/routers/graph.py">graph.py:237</a>). Chunk nodes carry a 768-element
     <code>embedding</code> array; <code>toString</code> on an array raises, whereas
     <code>toStringOrNull</code> yields null and the <code>CONTAINS</code> simply evaluates falsey. Without
     it, every search over a populated graph would error.

@@ -272,7 +272,7 @@
   <rect x="180" y="134" width="330" height="80" rx="8" class="d-violet"/>
   <text x="345" y="158" class="d-t sm b d-c">create a catalogue node</text>
   <text x="345" y="178" class="d-m mono d-c">{data_root}/{category}/{filename}</text>
-  <text x="345" y="198" class="d-m xs d-c">a synthetic path under /app/project_data</text>
+  <text x="345" y="198" class="d-m xs d-c">a synthetic path under the configured DATA_ROOT</text>
 
   <path d="M 345 216 L 345 244" class="d-arrow dash" marker-end="url(#m-ah)"/>
   <rect x="120" y="246" width="450" height="58" rx="8" class="d-box"/>
@@ -281,8 +281,8 @@
 </svg>
 <figcaption>
   <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:239</a>. The synthetic root is
-  the container ingestion root, deliberately, so catalogue-only entries converge with real files
-  rather than forking into duplicates.
+  the configured ingestion root (<code>data_root</code> / <code>DATA_ROOT</code>), deliberately, so
+  catalogue-only entries converge with real files rather than forking into duplicates.
 </figcaption>
 </figure>
 
@@ -407,21 +407,21 @@
 
 <div class="table-wrap">
 <table>
-  <thead><tr><th>Stage</th><th>Container command</th><th>HTTP equivalent</th></tr></thead>
+  <thead><tr><th>Stage</th><th>Native command (in your venv)</th><th>HTTP equivalent</th></tr></thead>
   <tbody>
     <tr>
       <td>Ingest</td>
-      <td><code>docker exec -it em_b_v2-api-1 python -m pipeline.ingest</code></td>
+      <td><code>python -m pipeline.ingest</code></td>
       <td><span class="tag post">POST</span> <code>/admin/ingest</code></td>
     </tr>
     <tr>
       <td>Manifest</td>
-      <td><code>docker exec -it em_b_v2-api-1 python -m pipeline.load_manifest</code></td>
+      <td><code>python -m pipeline.load_manifest</code></td>
       <td><span class="tag post">POST</span> <code>/admin/load-manifest</code></td>
     </tr>
     <tr>
       <td>Enrich</td>
-      <td><code>docker exec -it em_b_v2-api-1 python -m pipeline.enrich</code></td>
+      <td><code>python -m pipeline.enrich</code></td>
       <td>—</td>
     </tr>
   </tbody>
@@ -430,10 +430,11 @@
 
 <p>
   Each module has an <code>if __name__ == "__main__"</code> block that builds its own Neo4j session and
-  closes the driver in a <code>finally</code>, which is what makes the <code>docker exec</code> form
-  work. The admin router
-  (<a class="ref" href="../../src/routers/admin.py">admin.py:66</a>) wraps the same functions with the
-  request-scoped session instead.
+  closes the driver in a <code>finally</code>, which is what makes the direct
+  <code>python -m pipeline.*</code> form work (it loads <code>.env</code> for connection settings —
+  <a class="ref" href="../../scripts/dev-up.ps1">scripts/dev-up.ps1</a> does this for the API). The admin
+  router (<a class="ref" href="../../src/routers/admin.py">admin.py:66</a>) wraps the same functions with
+  the request-scoped session instead.
 </p>
 
 <div class="pagenav">

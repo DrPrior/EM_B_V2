@@ -27,46 +27,63 @@
 
 <h1>Deployment</h1>
 <p class="lede">
-  Why Ollama lives outside Docker, what happens in the first two seconds of app startup, and how the
-  Electron wrapper turns all of it into a double-click for someone who has never heard of a container.
+  Why every service runs as a native host process, why Ollama in particular must be native, what happens
+  in the first two seconds of app startup, and how the Electron shell turns all of it into a
+  double-click for someone who has never heard of a server.
 </p>
 
-<h2>The hybrid split</h2>
+<div class="note warn">
+  <strong>⚠️ Decontainerization in progress — this page describes the native target</strong>
+  <p>
+    Docker is being removed. Neo4j and the API move from containers to <strong>native host
+    processes</strong> supervised by the Electron shell; Ollama was always native. The canonical plan,
+    including the file-by-file Electron rewrite (Workstream&nbsp;D), is
+    <a class="ref" href="../../docs/DECONTAINERIZE_PLAN.md">docs/DECONTAINERIZE_PLAN.md</a>; the developer
+    runbook is <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>. The
+    <code>docker-compose*.yml</code> files are already gone; the Electron shell's native process manager
+    is still landing, so a few file references below point at the target rather than merged code.
+  </p>
+</div>
+
+<h2>Everything native — and why Ollama especially</h2>
 
 <p>
-  Ollama used to be a third compose service. It was moved to the host because a containerised Ollama
-  cannot portably reach the GPU: CUDA passthrough needs the NVIDIA container toolkit, Metal is
-  unavailable to Linux containers entirely, and Intel Arc / Vulkan needs device mappings that differ per
-  machine. A host-native install gets whatever accelerator the machine has, for free.
+  All three services run as native processes on <code>127.0.0.1</code>: the API (uvicorn), Neo4j
+  (native server + a bundled JRE), and Ollama. Ollama was host-native long before the others, because a
+  containerised Ollama cannot portably reach the GPU: CUDA passthrough needs the NVIDIA container
+  toolkit, Metal is unavailable to Linux containers entirely, and Intel Arc / Vulkan needs device
+  mappings that differ per machine. A host-native install gets whatever accelerator the machine has, for
+  free. The decontainerization brings Neo4j and the API onto the host beside it.
 </p>
 
 <p>
-  The cost of that decision is that the model-provisioning logic which used to live in an entrypoint
-  script inside the Ollama container now has to be driven remotely, over HTTP, by the API. That is what
-  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py</a> is.
+  Because Ollama has always been a separate host process, the model-provisioning logic lives not in an
+  Ollama entrypoint script but in the API, which drives it remotely over HTTP. That is what
+  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py</a> is — and it is
+  unchanged by the move to native, since the API always reached Ollama over the network.
 </p>
 
 <div class="table-wrap">
 <table>
   <thead><tr><th>Concern</th><th>Where it lives</th><th>Consequence</th></tr></thead>
   <tbody>
-    <tr><td>Neo4j</td><td>Container, named volume <code>em_b_v2_neo4j_data</code></td><td>Graph survives <code>compose down</code>; image is pinned so exported snapshots load elsewhere</td></tr>
-    <tr><td>API</td><td>Container, <code>--reload</code>, source bind-mounted</td><td>Save a <code>.py</code> and it restarts in seconds</td></tr>
-    <tr><td>Ollama</td><td>Host, native install</td><td>Not in <code>depends_on</code>; the app waits for it in code instead</td></tr>
-    <tr><td>Model definitions</td><td><code>Modelfile</code> / <code>Modelfile.embeddings</code></td><td>Both COPYed into the image <em>and</em> bind-mounted, so edits apply without a rebuild</td></tr>
+    <tr><td>Neo4j</td><td>Native server, its own data directory</td><td>Graph survives a restart; the version is pinned (2026.04.0) so exported snapshots load elsewhere</td></tr>
+    <tr><td>API</td><td>Native process — <code>uvicorn --reload</code> in dev, a frozen exe when shipped</td><td>In dev, save a <code>.py</code> and it restarts in seconds</td></tr>
+    <tr><td>Ollama</td><td>Host, native install</td><td>Started by the shell; the app waits for it in code before serving</td></tr>
+    <tr><td>Model definitions</td><td><code>Modelfile</code> / <code>Modelfile.embeddings</code></td><td>Kept next to the app and read at startup, so edits apply on the next bootstrap</td></tr>
   </tbody>
 </table>
 </div>
 
-<div class="note warn">
-  <strong>The one-time host setup</strong>
+<div class="note">
+  <strong>The one-time host setup got simpler</strong>
   <p>
-    Ollama must be started with <code>OLLAMA_HOST=0.0.0.0</code>, otherwise it binds to loopback only and
-    the container's requests to <code>host.docker.internal:11434</code> are refused. Full instructions
-    are in <a class="ref" href="../../docs/HYBRID_SETUP.md">docs/HYBRID_SETUP.md</a>. Note the security
-    trade-off: <code>0.0.0.0</code> exposes the daemon to the local network, which is why
-    <a class="ref" href="../../scripts/harden-ollama-firewall.ps1">scripts/harden-ollama-firewall.ps1</a>
-    exists.
+    A native API reaches Ollama over <code>http://localhost:11434</code>, so Ollama stays on its default
+    loopback bind — <code>OLLAMA_HOST=0.0.0.0</code> is <strong>no longer needed</strong>, and with it the
+    whole LAN-exposure problem and firewall-hardening step disappear (that script is being retired). What
+    remains is installing Ollama and keeping the warmth/perf env vars
+    (<code>OLLAMA_KEEP_ALIVE=-1</code>, <code>OLLAMA_MAX_LOADED_MODELS=2</code>, …). Full instructions are
+    in <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>.
   </p>
 </div>
 
@@ -87,7 +104,7 @@
   <rect x="250" y="88" width="300" height="58" rx="8" class="d-green"/>
   <text x="400" y="110" class="d-t sm b d-c">Neo4jConnection.get_instance()</text>
   <text x="400" y="128" class="d-m xs d-c">reads NEO4J_AUTH + DB_URI, verifies connectivity</text>
-  <text x="400" y="142" class="d-m xs d-c">ValueError if either is missing → container exits</text>
+  <text x="400" y="142" class="d-m xs d-c">ValueError if either is missing → process exits</text>
   <path d="M 400 148 L 400 170" class="d-arrow" marker-end="url(#d-ah)"/>
 
   <rect x="250" y="172" width="300" height="58" rx="8" class="d-green"/>
@@ -194,9 +211,10 @@
 <h3>Why the Modelfile gets parsed instead of sent</h3>
 
 <p>
-  <code>ollama create -f Modelfile</code> is not available here for two reasons: the host daemon cannot
-  read a file that lives inside the API container, and modern <code>/api/create</code> no longer accepts
-  a raw Modelfile string. So
+  <code>ollama create -f Modelfile</code> is not used here for two reasons: the app provisions models
+  purely over Ollama's HTTP API — it never shells out to an <code>ollama</code> CLI, which a frozen,
+  CLI-free deployment can't assume is on <code>PATH</code> — and modern <code>/api/create</code> no
+  longer accepts a raw Modelfile string. So
   <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:159</a> parses the
   file itself, extracting the <code>SYSTEM</code> block — including the triple-quoted multi-line form,
   handled by <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:201</a> —
@@ -227,10 +245,22 @@
 <p>
   <code>electron/</code> wraps everything above for non-technical users. A single window opens as a
   setup wizard and navigates to <code>http://127.0.0.1:8000</code> once the backend reports healthy
-  (<a class="ref" href="../../electron/main.js">main.js:63</a>). Heavy assets — the API image tar, a
-  pre-built graph snapshot, and the document corpus — are delivered on a USB drive rather than
-  downloaded.
+  (<a class="ref" href="../../electron/main.js">main.js:63</a>). Heavy assets — the signed API bundle,
+  native Neo4j plus its bundled JRE, a pre-built graph snapshot, and the document corpus — are delivered
+  on a USB drive rather than downloaded.
 </p>
+
+<div class="note warn">
+  <strong>This is the native target; the shell rewrite is in progress</strong>
+  <p>
+    The steps below describe the shell <em>after</em> Workstream&nbsp;D of
+    <a class="ref" href="../../docs/DECONTAINERIZE_PLAN.md">DECONTAINERIZE_PLAN.md</a>: it spawns and
+    supervises native processes instead of a Docker stack. Until that lands, the merged Electron code
+    still drives the old Docker path. <code>supervisor.js</code>, <code>firstrun.js</code> and
+    <code>main.js</code> are rewritten in place; the compose/Docker helpers are replaced by a native
+    process manager.
+  </p>
+</div>
 
 <figure>
 <svg viewBox="0 0 880 520" role="img" aria-label="Electron first-run wizard steps and the subsequent-launch fast path">
@@ -248,16 +278,16 @@
     <text x="116" y="80" class="d-m xs d-c">detect accelerator (informational)</text>
 
     <rect x="240" y="40" width="200" height="52" rx="8" class="d-violet"/>
-    <text x="340" y="62" class="d-t sm b d-c">2 · docker</text>
-    <text x="340" y="80" class="d-m xs d-c">install Desktop if missing, await daemon</text>
+    <text x="340" y="62" class="d-t sm b d-c">2 · ollama</text>
+    <text x="340" y="80" class="d-m xs d-c">install if missing, set perf env vars</text>
 
-    <rect x="464" y="40" width="200" height="52" rx="8" class="d-violet"/>
-    <text x="564" y="62" class="d-t sm b d-c">3 · ollama</text>
-    <text x="564" y="80" class="d-m xs d-c">install, then persist host env vars</text>
+    <rect x="464" y="40" width="200" height="52" rx="8" class="d-rose"/>
+    <text x="564" y="62" class="d-t sm b d-c">3 · models</text>
+    <text x="564" y="80" class="d-m xs d-c">~10 GB, from the internet</text>
 
-    <rect x="688" y="40" width="176" height="52" rx="8" class="d-rose"/>
-    <text x="776" y="62" class="d-t sm b d-c">4 · models</text>
-    <text x="776" y="80" class="d-m xs d-c">~10 GB, from the internet</text>
+    <rect x="688" y="40" width="176" height="52" rx="8" class="d-violet"/>
+    <text x="776" y="62" class="d-t sm b d-c">4 · neo4j</text>
+    <text x="776" y="80" class="d-m xs d-c">unpack Neo4j + bundled JRE</text>
   </g>
 
   <path d="M 220 66 L 236 66" class="d-arrow" marker-end="url(#w-ah)"/>
@@ -266,9 +296,9 @@
   <path d="M 776 96 L 776 118 L 116 118 L 116 140" class="d-arrow" marker-end="url(#w-ah)"/>
 
   <g>
-    <rect x="16" y="142" width="200" height="52" rx="8" class="d-green"/>
-    <text x="116" y="164" class="d-t sm b d-c">5 · image</text>
-    <text x="116" y="182" class="d-m xs d-c">verify sha256, docker load from USB</text>
+    <rect x="16" y="142" width="200" height="52" rx="8" class="d-violet"/>
+    <text x="116" y="164" class="d-t sm b d-c">5 · runtime</text>
+    <text x="116" y="182" class="d-m xs d-c">verify sha256, unpack API bundle</text>
 
     <rect x="240" y="142" width="200" height="52" rx="8" class="d-green"/>
     <text x="340" y="164" class="d-t sm b d-c">6 · data</text>
@@ -276,11 +306,11 @@
 
     <rect x="464" y="142" width="200" height="52" rx="8" class="d-green"/>
     <text x="564" y="164" class="d-t sm b d-c">7 · snapshot</text>
-    <text x="564" y="182" class="d-m xs d-c">import the pre-built graph dump</text>
+    <text x="564" y="182" class="d-m xs d-c">load graph dump via neo4j-admin</text>
 
     <rect x="688" y="142" width="176" height="52" rx="8" class="d-accent"/>
     <text x="776" y="164" class="d-t sm b d-c">8 · start</text>
-    <text x="776" y="182" class="d-m xs d-c">compose up, poll /health</text>
+    <text x="776" y="182" class="d-m xs d-c">spawn processes → /health</text>
   </g>
 
   <path d="M 220 168 L 236 168" class="d-arrow" marker-end="url(#w-ah)"/>
@@ -295,23 +325,23 @@
 
   <text x="16" y="334" class="d-m b">EVERY LAUNCH AFTER THAT — quickStart(), marker file present</text>
   <rect x="16" y="348" width="252" height="52" rx="8" class="d-violet"/>
-  <text x="142" y="370" class="d-t sm b d-c">wait for Docker</text>
-  <text x="142" y="388" class="d-m xs d-c">30 tries × 2s, else "start Docker Desktop"</text>
+  <text x="142" y="370" class="d-t sm b d-c">ensure Ollama + self-heal env</text>
+  <text x="142" y="388" class="d-m xs d-c">re-applies the warmth/perf vars if cleared</text>
 
   <path d="M 272 374 L 290 374" class="d-arrow" marker-end="url(#w-ah)"/>
-  <rect x="294" y="348" width="252" height="52" rx="8" class="d-violet"/>
-  <text x="420" y="370" class="d-t sm b d-c">wait for Ollama + self-heal env</text>
-  <text x="420" y="388" class="d-m xs d-c">re-applies OLLAMA_HOST if something cleared it</text>
+  <rect x="294" y="348" width="252" height="52" rx="8" class="d-green"/>
+  <text x="420" y="370" class="d-t sm b d-c">spawn Neo4j → wait for bolt</text>
+  <text x="420" y="388" class="d-m xs d-c">readiness probe, not just process-alive</text>
 
   <path d="M 550 374 L 568 374" class="d-arrow" marker-end="url(#w-ah)"/>
   <rect x="572" y="348" width="292" height="52" rx="8" class="d-accent"/>
-  <text x="718" y="370" class="d-t sm b d-c">compose up → poll /health → navigate</text>
+  <text x="718" y="370" class="d-t sm b d-c">spawn API → poll /health → navigate</text>
   <text x="718" y="388" class="d-m xs d-c">60 tries × 2s</text>
 
   <rect x="16" y="428" width="848" height="76" rx="9" class="d-box"/>
   <text x="34" y="452" class="d-t sm b">Resumability is the point</text>
-  <text x="34" y="472" class="d-t sm">Docker Desktop often demands a reboot mid-install. The wizard throws a RebootRequiredError, the renderer explains it, and on relaunch every step</text>
-  <text x="34" y="490" class="d-t sm">re-checks its own precondition — installed? daemon up? image loaded? marker written? — so provisioning picks up exactly where it stopped.</text>
+  <text x="34" y="472" class="d-t sm">A runtime install can still demand a reboot mid-provision. The wizard throws a RebootRequiredError, the renderer explains it, and on relaunch every step</text>
+  <text x="34" y="490" class="d-t sm">re-checks its own precondition — Ollama up? models pulled? Neo4j unpacked? snapshot loaded? marker written? — so provisioning picks up exactly where it stopped.</text>
 </svg>
 <figcaption>
   <a class="ref" href="../../electron/lib/firstrun.js">firstrun.js:54</a> is the first-run orchestrator ·
@@ -339,43 +369,46 @@
     browser (<a class="ref" href="../../electron/main.js">main.js:55</a>).
   </li>
   <li>
-    <strong>Quit tears the stack down.</strong> <code>before-quit</code> is intercepted, runs
-    <code>compose down</code>, then quits for real — data persists in the named volume
-    (<a class="ref" href="../../electron/main.js">main.js:145</a>).
+    <strong>Quit tears the processes down.</strong> <code>before-quit</code> is intercepted, kills the
+    whole child process tree (Neo4j + API — Windows <code>taskkill /T</code> or <code>tree-kill</code>),
+    then quits for real — the graph persists in Neo4j's data directory
+    (<a class="ref" href="../../electron/main.js">main.js:145</a>). Startup ordering, crash detection,
+    orphan cleanup, and port-in-use collisions (7687 / 8000 / 7474) are all things the shell now owns
+    directly — Docker used to hand them over for free.
   </li>
   <li>
-    <strong>Assets are checksum-verified.</strong> The image tar, snapshot and corpus archive each carry
-    a SHA-256 in the asset manifest, checked before use.
+    <strong>Assets are checksum-verified.</strong> The API bundle, Neo4j runtime, snapshot and corpus
+    archive each carry a SHA-256 in the asset manifest, checked before use.
   </li>
 </ul>
 
 <h2>Everyday commands</h2>
 
-<pre><code># Start (Ollama must already be running on the host)
-docker compose up -d
+<pre><code># Start the API in dev (native Neo4j + Ollama already running); loads .env,
+# checks both are reachable, then runs uvicorn --reload
+scripts/dev-up.ps1
 
-# Watch the API — hot reload is on, saving a .py file restarts it
-docker logs -f em_b_v2-api-1
-
-# Re-provision models without restarting the container
+# Re-provision models without restarting the API
 curl.exe -s -X POST http://localhost:8000/admin/bootstrap-models
 
-# Full graph rebuild
-docker exec -it em_b_v2-api-1 python -m pipeline.ingest
-docker exec -it em_b_v2-api-1 python -m pipeline.load_manifest
-docker exec -it em_b_v2-api-1 python -m pipeline.enrich
+# Full graph rebuild — run directly in your venv
+python -m pipeline.ingest
+python -m pipeline.load_manifest
+python -m pipeline.enrich
 
 # Tests
-docker exec em_b_v2-api-1 pytest</code></pre>
+pytest</code></pre>
 
 <p>
   Helper scripts sit in <a href="../../scripts/">scripts/</a>:
+  <a class="ref" href="../../scripts/dev-up.ps1">dev-up.ps1</a> is the native launcher above;
   <a class="ref" href="../../scripts/export-graph.ps1">export-graph.ps1</a> and
-  <a class="ref" href="../../scripts/import-graph.ps1">import-graph.ps1</a> move a graph snapshot between
-  machines — which is why the Neo4j image tag is pinned rather than <code>:latest</code>, since the
-  store format must match on both ends.
+  <a class="ref" href="../../scripts/import-graph.ps1">import-graph.ps1</a> drive native
+  <code>neo4j-admin</code> to move a graph snapshot between machines — which is why the Neo4j version is
+  pinned (2026.04.0) rather than floating, since the store format must match on both ends.
   <a class="ref" href="../../scripts/verify-arc-gpu.ps1">verify-arc-gpu.ps1</a> confirms Intel Arc
-  acceleration is actually being used.
+  acceleration is actually being used. (<code>harden-ollama-firewall.ps1</code> is being retired — with
+  Ollama back on loopback there is no LAN exposure to harden.)
 </p>
 
 <div class="pagenav">

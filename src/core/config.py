@@ -170,6 +170,17 @@ class Settings(BaseSettings):
             "latency without truncating typical results."
         ),
     )
+    enrichment_concurrency: int = Field(
+        default=4,
+        description=(
+            "How many chunk entity-extraction LLM calls the enrichment pipeline "
+            "(pipeline/enrich.py, Pass 2) issues to Ollama concurrently. Real "
+            "speedup requires the host Ollama to allow at least this many parallel "
+            "slots (OLLAMA_NUM_PARALLEL) and enough VRAM for their KV caches; "
+            "measured ~2.3x throughput at 4 on an RTX 4000 Ada. Neo4j writes stay "
+            "serial on the main thread. 1 = fully sequential (the old behavior)."
+        ),
+    )
     timing_log_enabled: bool = Field(
         default=True,
         description=(

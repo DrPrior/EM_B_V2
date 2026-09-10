@@ -10,11 +10,13 @@ Run directly:
 """
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from neo4j import ManagedTransaction, Session  # type: ignore[import-untyped]
 
 from pipeline.extract import extract_entities, extract_material_type
+from src.core.config import settings
 from src.database import schema
 from src.database.connection import Neo4jConnection
 
@@ -146,39 +148,51 @@ def enrich_chunks(session: Session, stats: dict) -> None:
         print("  All chunks already enriched. Skipping.")
         return
 
-    print(f"  Found {total} unenriched chunks\n")
+    workers = max(1, settings.enrichment_concurrency)
+    print(f"  Found {total} unenriched chunks  (LLM concurrency={workers})\n")
 
-    for index, row in enumerate(rows, start=1):
-        chunk_id: str = row["chunk_id"]
-        text: str = row["text"] or ""
-        filepath: str = row["filepath"]
-        filename: str = row["filename"] or Path(filepath).name
+    def _extract(row: object) -> dict:
+        # extract_entities already swallows its own errors and returns empty
+        # lists, so this never raises — safe to run across the pool's threads.
+        return extract_entities(row["text"] or "")
 
-        try:
-            entities = extract_entities(text)
-            session.execute_write(_enrich_chunk_tx, chunk_id, filepath, entities)
+    # The LLM call (~seconds) is the bottleneck, so those run in a thread pool up
+    # to `workers` at a time (blocking HTTP releases the GIL). Neo4j writes stay
+    # on THIS thread: a Session isn't thread-safe, serial writes are negligible
+    # next to the LLM call, and concurrent MERGEs on shared Concept/Org nodes
+    # would contend. pool.map yields in input order so progress stays ordered.
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for index, (row, entities) in enumerate(
+            zip(rows, pool.map(_extract, rows), strict=True), start=1
+        ):
+            chunk_id: str = row["chunk_id"]
+            filepath: str = row["filepath"]
+            filename: str = row["filename"] or Path(filepath).name
 
-            stats["chunks_enriched"] += 1
-            stats["concepts"] += len(entities["concepts"])
-            stats["organizations"] += len(entities["organizations"])
-            stats["legal_references"] += len(entities["legal_references"])
-            stats["courses"] += len(entities["courses"])
+            try:
+                session.execute_write(_enrich_chunk_tx, chunk_id, filepath, entities)
 
-            _print_progress(
-                index,
-                total,
-                filename,
-                {
-                    "concepts": len(entities["concepts"]),
-                    "organizations": len(entities["organizations"]),
-                    "legal_references": len(entities["legal_references"]),
-                    "courses": len(entities["courses"]),
-                },
-            )
+                stats["chunks_enriched"] += 1
+                stats["concepts"] += len(entities["concepts"])
+                stats["organizations"] += len(entities["organizations"])
+                stats["legal_references"] += len(entities["legal_references"])
+                stats["courses"] += len(entities["courses"])
 
-        except Exception as e:
-            print(f"  ⚠  [{index}/{total}] Chunk {chunk_id[:8]}... failed: {e}")
-            stats["errors"] += 1
+                _print_progress(
+                    index,
+                    total,
+                    filename,
+                    {
+                        "concepts": len(entities["concepts"]),
+                        "organizations": len(entities["organizations"]),
+                        "legal_references": len(entities["legal_references"]),
+                        "courses": len(entities["courses"]),
+                    },
+                )
+
+            except Exception as e:
+                print(f"  ⚠  [{index}/{total}] Chunk {chunk_id[:8]}... failed: {e}")
+                stats["errors"] += 1
 
 
 # ==========================================

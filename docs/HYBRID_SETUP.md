@@ -167,7 +167,7 @@ On startup the API will:
 1. Wait for the host Ollama daemon (retries `ollama_startup_retries` times; if
    it never answers, the container **exits** with a clear message — start Ollama
    and bring the stack back up).
-2. Pull the base models (`gemma4:12b-it-qat`, `qwen3-embedding:4b`) if missing —
+2. Pull the base models (`gemma4:12b-it-qat`, `embeddinggemma:latest`) if missing —
    the first run downloads ~10 GB, so be patient.
 3. Build the custom `chat-model` / `embedding-model` variants from
    [`Modelfile`](../Modelfile) and [`Modelfile.embeddings`](../Modelfile.embeddings)

@@ -39,7 +39,12 @@ def discover_files(root_path: str) -> list[str]:
         root_path: Root directory to traverse.
 
     Returns:
-        List of absolute file paths.
+        List of absolute file paths in forward-slash (POSIX) form.
+
+    Paths are normalized to forward slashes with ``Path.as_posix()`` so the
+    stored ``File.filepath`` is separator-agnostic: native Windows ingestion
+    produces the same convention the ``/files`` URL space and the shipped graph
+    dump use. On POSIX hosts this is a no-op.
     """
     supported_extensions = {".txt", ".md", ".pdf", ".docx", ".pptx"}
     files = []
@@ -54,7 +59,7 @@ def discover_files(root_path: str) -> list[str]:
             name_upper = file_path.name.upper()
             if name_upper.startswith("MANIFEST") and name_upper.endswith(".MD"):
                 continue  # corpus metadata, handled by pipeline.load_manifest
-            files.append(str(file_path))
+            files.append(file_path.as_posix())
 
     return sorted(files)
 
@@ -290,12 +295,14 @@ def create_directory_hierarchy(session: Session, file_path: str, data_root: str)
 
     dirs.reverse()  # root first, deepest last
 
+    # Store forward-slash (POSIX) paths so Directory.path matches File.filepath
+    # and the /files URL space regardless of host OS (no-op on POSIX hosts).
     for i, dir_path in enumerate(dirs):
-        create_directory_node(session, str(dir_path), dir_path.name)
+        create_directory_node(session, dir_path.as_posix(), dir_path.name)
         if i > 0:
-            _link_directories(session, str(dirs[i - 1]), str(dir_path))
+            _link_directories(session, dirs[i - 1].as_posix(), dir_path.as_posix())
 
-    return str(Path(file_path).parent)
+    return Path(file_path).parent.as_posix()
 
 
 def create_file_node(
@@ -521,6 +528,8 @@ if __name__ == "__main__":
     nc = Neo4jConnection.get_instance()
     try:
         with nc.session() as session:
-            ingest_project_data(session)
+            # Honor DATA_ROOT (settings.data_root) so native runs ingest the host
+            # corpus; unchanged under Docker where the default is /app/project_data.
+            ingest_project_data(session, data_root=settings.data_root)
     finally:
         nc.close()

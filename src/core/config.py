@@ -5,9 +5,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
+    # extra="ignore": the shared .env carries keys this model doesn't declare —
+    # NEO4J_AUTH and DB_URI (read directly from os.environ by
+    # src/database/connection.py) plus legacy Docker-compose interpolation keys
+    # (APP_VERSION, PROJECT_DATA_DIR, COMPOSE_PROJECT_NAME). Under Docker no .env
+    # existed inside the container so this never bit; running natively, pydantic
+    # reads the on-disk .env and would reject those as extra unless we ignore them.
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
+        extra="ignore",
     )
 
     ollama_base_url: str = Field(
@@ -29,7 +36,7 @@ class Settings(BaseSettings):
         default="embedding-model",
         description=(
             "Embedding model name for Ollama — the custom variant built from "
-            "Modelfile.embeddings by the startup bootstrap (FROM qwen3-embedding:4b)"
+            "Modelfile.embeddings by the startup bootstrap (FROM embeddinggemma:latest)"
         ),
     )
     chat_base_model: str = Field(
@@ -41,7 +48,7 @@ class Settings(BaseSettings):
         ),
     )
     embedding_base_model: str = Field(
-        default="qwen3-embedding:4b",
+        default="embeddinggemma:latest",
         description=(
             "Base model the embedding-model variant is built FROM. The startup "
             "bootstrap pulls this onto the host before creating embedding-model. "

@@ -27,8 +27,8 @@ def reset_rate_limiter():
 
 @pytest.fixture
 def sample_embedding() -> list[float]:
-    """A 2560-dimensional embedding matching ``qwen3-embedding:4b`` output."""
-    return [0.1] * 2560
+    """A 768-dimensional embedding matching ``embeddinggemma`` output."""
+    return [0.1] * 768
 
 
 @pytest.fixture

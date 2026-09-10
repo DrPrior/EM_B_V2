@@ -109,7 +109,7 @@ that is fully offline and one that pulls 10 GB over the user's connection.
 
 ```powershell
 ollama pull gemma4:12b-it-qat
-ollama pull qwen3-embedding:4b
+ollama pull embeddinggemma:latest
 ```
 
 **Pull the base models only.** Do *not* hand-build the `chat-model` /
@@ -135,7 +135,7 @@ ollama list                                                     # both base mode
 [Environment]::GetEnvironmentVariable('OLLAMA_HOST','User')     # 0.0.0.0
 ```
 
-`ollama list` should show `gemma4:12b-it-qat` and `qwen3-embedding:4b`. If
+`ollama list` should show `gemma4:12b-it-qat` and `embeddinggemma:latest`. If
 `chat-model` and `embedding-model` also appear, this machine has already run the
 app — that is fine and setup will skip straight past them.
 

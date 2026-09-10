@@ -1,4 +1,4 @@
-ok """Graph query router for Neo4j endpoints.
+"""Graph query router for Neo4j endpoints.
 
 This module provides REST API endpoints for querying and searching
 the Neo4j knowledge graph.

@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from pathlib import Path
 from typing import cast
 from urllib.parse import quote
 
@@ -49,18 +50,23 @@ def _superseded_by(record: dict) -> str | None:
 def _file_url(filepath: str | None) -> str | None:
     """Build a `/files/...` URL the UI can link to, from a File's filepath.
 
-    The stored filepath is the absolute path inside the container (under
+    The stored filepath is the absolute path used at ingest time (under
     ``settings.data_root``). We strip that root and return a URL-encoded path
     served by the files router. Catalog-only nodes (no on-disk file) still get a
     URL; the endpoint simply 404s if the file is absent.
+
+    Both sides are normalized to forward-slash (POSIX) form so this works
+    regardless of the host OS: native Windows ingestion stores Windows paths, but
+    the ``/files`` URL space — and the shipped graph dump — use forward slashes.
     """
     if not filepath:
         return None
-    root = settings.data_root.rstrip("/")
-    if filepath.startswith(root + "/"):
-        rel = filepath[len(root) + 1 :]
+    root = Path(settings.data_root).as_posix().rstrip("/")
+    fp = Path(filepath).as_posix()
+    if fp.startswith(root + "/"):
+        rel = fp[len(root) + 1 :]
     else:
-        rel = filepath.lstrip("/")
+        rel = fp.lstrip("/")
     if not rel:
         return None
     return f"/files/{quote(rel)}"

@@ -10,6 +10,19 @@ from src.services.session import ConversationStore
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _pin_data_root(monkeypatch):
+    """Pin data_root so citation-URL assertions don't depend on a dev's .env.
+
+    The fixtures below use ``/app/project_data/...`` filepaths; this keeps
+    ``_file_url`` stripping that root regardless of the ambient DATA_ROOT a
+    native dev has configured.
+    """
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "data_root", "/app/project_data")
+
+
 EMPTY_ENTITIES = {
     "concepts": [],
     "organizations": [],

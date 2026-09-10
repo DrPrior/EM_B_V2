@@ -78,6 +78,34 @@ docker exec em_b_v2-api-1 pytest                             # tests inside the 
 ```
 </details>
 
+## Contribution Workflow
+
+**Never commit directly to `main`.** Every task — however small — ships through a pull request. For each task, in this order:
+
+1. **Branch from `main`.** Make sure `main` is current first, then cut the branch:
+
+   ```bash
+   git checkout main
+   git pull
+   git checkout -b claude/<short-description>
+   ```
+
+   Branch names use the `claude/` prefix plus a short kebab-case description of the task (e.g. `claude/graph-ingest-router`, `claude/fix-neo4j-session-leak`).
+2. **Test in local environment** App is being refactored to run directly on local machine. If necessary refactor the relavent tests to work with this new arichtecture.
+
+3. **Commit to the branch.** Small, focused commits with messages describing *why* the change was made, not just what changed.
+
+4. **Open a pull request** against `main`:
+
+   ```bash
+   git push -u origin claude/<short-description>
+   gh pr create --base main
+   ```
+
+   The PR body states what changed, why, and the exact test commands that were run along with their results.
+
+5. **Stop there and report the PR URL.** Do not merge — review and merge are the repo owner's call. Do not use `--no-verify` or otherwise bypass hooks.
+
 ## Architecture
 
 ### Data pipeline (run order matters)

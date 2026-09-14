@@ -24,8 +24,8 @@ from src.core.config import settings
 logger = logging.getLogger("em_b.timing")
 
 # Attach a stdout handler once, only if the root logger isn't already
-# configured, so timing lines show up in `docker logs em_b_v2-api-1` alongside
-# uvicorn output without double-logging when a handler chain already exists.
+# configured, so timing lines show up in the API's stdout (uvicorn) output
+# without double-logging when a handler chain already exists.
 if not logger.handlers and not logging.getLogger().handlers:
     _handler = logging.StreamHandler(sys.stdout)
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))

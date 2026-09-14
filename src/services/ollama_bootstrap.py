@@ -1,14 +1,12 @@
-"""Startup bootstrap for the host-native (hybrid) Ollama daemon.
+"""Startup bootstrap for the host-native Ollama daemon.
 
-In the hybrid deployment Ollama no longer runs as a Docker service — it runs
-natively on each host so it can use the host GPU (Metal / CUDA / Vulkan). That
-means the work the old ``ollama-startup.sh`` entrypoint did inside the Ollama
-container (pull the base models, build the custom ``chat-model`` /
-``embedding-model`` variants from the Modelfiles) now has to be driven by the
-application over HTTP against ``settings.ollama_base_url``
-(``http://host.docker.internal:11434`` from inside the container).
+Ollama runs natively on each host so it can use the host GPU (Metal / CUDA /
+Vulkan). The application (also native) reaches it over ``settings.ollama_base_url``
+(``http://localhost:11434``) and provisions its models on startup: pull the base
+models and build the custom ``chat-model`` / ``embedding-model`` variants from
+the Modelfiles.
 
-This module replays that logic over the Ollama REST API, all idempotent:
+This module drives that over the Ollama REST API, all idempotent:
 
 - :func:`wait_for_ollama` retries the daemon's ``/api/version`` heartbeat and
   raises (fail-fast) if the host hasn't started Ollama.
@@ -25,6 +23,7 @@ from pathlib import Path
 
 import requests
 
+from src.core import paths
 from src.core.config import settings
 
 logger = logging.getLogger("em_b.bootstrap")
@@ -36,17 +35,14 @@ if not logger.handlers and not logging.getLogger().handlers:
     logger.propagate = False
 logger.setLevel(logging.INFO)
 
-# Repo root inside the container is /app (this file is /app/src/services/...).
-# The Modelfiles are copied/mounted there; locally this resolves to the repo root.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
 # (variant name, Modelfile path, base model the variant is built FROM).
-# Aligned with the FROM lines in Modelfile / Modelfile.embeddings.
+# Aligned with the FROM lines in Modelfile / Modelfile.embeddings. Paths resolve
+# via paths.modelfile_path so they work from source and inside a frozen bundle.
 _VARIANTS: tuple[tuple[str, Path, str], ...] = (
-    (settings.chat_model, _PROJECT_ROOT / "Modelfile", settings.chat_base_model),
+    (settings.chat_model, paths.modelfile_path("Modelfile"), settings.chat_base_model),
     (
         settings.embedding_model,
-        _PROJECT_ROOT / "Modelfile.embeddings",
+        paths.modelfile_path("Modelfile.embeddings"),
         settings.embedding_base_model,
     ),
 )
@@ -95,9 +91,8 @@ def wait_for_ollama() -> None:
 
     raise OllamaUnavailableError(
         "CRITICAL: could not reach host Ollama at "
-        f"{settings.ollama_base_url}. Start the Ollama application on the host "
-        "and ensure OLLAMA_HOST=0.0.0.0 so it accepts traffic from the "
-        "container. See docs/HYBRID_SETUP.md."
+        f"{settings.ollama_base_url}. Start the Ollama application on the host. "
+        "See docs/NATIVE_DEV.md."
     ) from last_exc
 
 

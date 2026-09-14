@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(
         default="http://localhost:11434",
         description=(
-            "Base URL for Ollama API. In the hybrid deployment Ollama runs "
-            "natively on the host, so the container overrides this with "
-            "http://host.docker.internal:11434 via OLLAMA_BASE_URL."
+            "Base URL for the host-native Ollama API. The app runs natively and "
+            "reaches Ollama over loopback; override via OLLAMA_BASE_URL only for a "
+            "non-default host or port."
         ),
     )
     chat_model: str = Field(

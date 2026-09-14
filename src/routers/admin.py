@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from pipeline.ingest import ingest_project_data
 from pipeline.load_manifest import load_manifests
+from src.core.config import settings
 from src.database.connection import Neo4jConnection
 from src.services.ollama_bootstrap import (
     OllamaUnavailableError,
@@ -19,13 +20,13 @@ from src.services.ollama_bootstrap import (
     wait_for_ollama,
 )
 
-# Trigger ingestion from the host:
+# Trigger ingestion from the host (uses the configured DATA_ROOT by default):
 #   curl.exe -s -X POST http://localhost:8000/admin/ingest | python -m json.tool
 #
 # To ingest a different directory, pass a JSON body with "data_root", e.g.:
 #   curl.exe -s -X POST http://localhost:8000/admin/ingest \
 #     -H "Content-Type: application/json" \
-#     -d "{\"data_root\": \"/app/project_data\"}" | python -m json.tool
+#     -d "{\"data_root\": \"C:/path/to/corpus\"}" | python -m json.tool
 #
 # Load manifest metadata (run after ingestion):
 #   curl.exe -s -X POST http://localhost:8000/admin/load-manifest | python -m json.tool
@@ -35,8 +36,12 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 class IngestRequest(BaseModel):
     data_root: str = Field(
-        default="/app/project_data",
-        description="Absolute path to the directory to ingest.",
+        default_factory=lambda: settings.data_root,
+        description=(
+            "Absolute path to the directory to ingest. Defaults to the "
+            "configured data_root (DATA_ROOT env), so a no-body request ingests "
+            "the same corpus the app serves."
+        ),
     )
 
 

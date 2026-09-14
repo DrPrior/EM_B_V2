@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles  # type: ignore[import-untyped]
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from src.core.paths import static_dir
 from src.core.rate_limit import limiter
 from src.database.connection import Neo4jConnection
 from src.database.schema import setup_constraints
@@ -104,5 +105,7 @@ def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-# Serve the chat UI — must be mounted last so API routes take priority
-app.mount("/", StaticFiles(directory="src/static", html=True), name="static")
+# Serve the chat UI — must be mounted last so API routes take priority.
+# Resolved via static_dir() so it works from source and inside a frozen bundle,
+# independent of the current working directory.
+app.mount("/", StaticFiles(directory=str(static_dir()), html=True), name="static")

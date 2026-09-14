@@ -1,17 +1,21 @@
 'use strict';
 
 /**
- * Import the prebuilt Neo4j graph snapshot into the local volume.
+ * Import the prebuilt Neo4j graph snapshot into the local native store.
  *
- * Node port of scripts/import-graph.ps1: Neo4j Community must be offline to load,
- * so we stop the service and run `neo4j-admin database load` in a throwaway
- * container that mounts the dump dir and shares the named data volume. Idempotent
- * via a marker file — the ~hours-long ingest/enrich pipeline is skipped entirely.
+ * Decontainerized port: runs the bundled native `neo4j-admin database load`
+ * (Neo4j must be offline, so the caller loads BEFORE starting the server)
+ * instead of a throwaway compose container. Idempotent via a marker file — the
+ * hours-long ingest/enrich pipeline is skipped entirely.
+ *
+ * The shipped dump must be in a Community-loadable record format (aligned /
+ * standard), not Enterprise `block` — see docs/DECONTAINERIZE_PLAN.md.
  */
 
 const fs = require('fs');
 const path = require('path');
-const compose = require('./compose');
+
+const { runStream } = require('./exec');
 const paths = require('./paths');
 
 const DATABASE = 'neo4j';
@@ -29,16 +33,14 @@ function readMarker() {
 }
 
 /**
- * True only if the snapshot has been loaded into the volume the desktop stack
- * currently uses. The marker records the target volume, so a volume change
- * (e.g. the fix that moved the desktop stack off the shared dev volume, which
- * leaves the new volume empty) re-imports instead of starting with an empty
- * graph. Markers written before this field existed have no `volume` and are
- * treated as stale, forcing a one-time re-import into the correct volume.
+ * True only if the snapshot was loaded into the Neo4j data dir currently in use.
+ * The marker records the target home dir, so a relocated install re-imports
+ * rather than starting with an empty graph. Markers without `dataDir` (e.g. from
+ * the old Docker volume era) are treated as stale, forcing a one-time re-import.
  */
 function alreadyImported() {
   const marker = readMarker();
-  return marker !== null && marker.volume === compose.NEO4J_VOLUME;
+  return marker !== null && marker.dataDir === paths.neo4jHomeDir();
 }
 
 function dumpPath() {
@@ -46,31 +48,32 @@ function dumpPath() {
 }
 
 /**
- * Load snapshot/<db>.dump into the em_b_v2_neo4j_data volume (overwriting any
- * existing local graph). Requires the dump to have been downloaded already.
+ * Load snapshot/neo4j.dump into the local Neo4j store (overwriting any existing
+ * local graph). Neo4j must be stopped — the caller runs this before start().
  * @param {(line:string)=>void} onLine
  */
-async function importSnapshot(envPath, onLine = () => {}) {
+async function importSnapshot(_envPath, onLine = () => {}) {
   if (alreadyImported()) {
     onLine('Graph already imported — skipping.');
     return;
   }
   const dump = dumpPath();
   if (!fs.existsSync(dump)) {
-    throw new Error(`Snapshot dump not found at ${dump}. Download it first.`);
+    throw new Error(`Snapshot dump not found at ${dump}. Provision it first.`);
   }
 
-  onLine('Stopping Neo4j (offline load required)…');
-  await compose.stop(envPath, 'neo4j', onLine);
-
-  // Docker Desktop wants forward-slashed absolute host paths for -v.
-  const hostSnapshot = paths.snapshotDir().replace(/\\/g, '/');
-  onLine('Loading graph into the local volume (existing data is overwritten)…');
-  const { code } = await compose.runOneOff(
-    envPath,
-    ['-v', `${hostSnapshot}:/snapshot`, 'neo4j',
-      'neo4j-admin', 'database', 'load', DATABASE,
-      '--from-path=/snapshot', '--overwrite-destination=true'],
+  onLine('Loading graph into the local Neo4j store (existing data is overwritten)…');
+  const env = { ...process.env, JAVA_HOME: paths.jreHomeDir() };
+  const { code } = await runStream(
+    paths.neo4jAdminPath(),
+    [
+      'database',
+      'load',
+      DATABASE,
+      `--from-path=${paths.snapshotDir()}`,
+      '--overwrite-destination=true',
+    ],
+    { env },
     onLine,
   );
   if (code !== 0) throw new Error('neo4j-admin database load failed.');
@@ -80,11 +83,11 @@ async function importSnapshot(envPath, onLine = () => {}) {
     JSON.stringify({
       importedAt: new Date().toISOString(),
       database: DATABASE,
-      volume: compose.NEO4J_VOLUME,
+      dataDir: paths.neo4jHomeDir(),
     }),
     'utf8',
   );
-  onLine(`Graph restored into ${compose.NEO4J_VOLUME}.`);
+  onLine('Graph restored into the local Neo4j store.');
 }
 
 module.exports = { importSnapshot, alreadyImported, dumpPath, DATABASE };

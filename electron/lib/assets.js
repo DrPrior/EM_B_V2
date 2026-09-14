@@ -40,10 +40,11 @@ function saveDir(dir) {
   fs.writeFileSync(savedDirPath(), JSON.stringify({ dir }), 'utf8');
 }
 
-/** True if `dir` looks like a setup-assets folder for this manifest. */
+/** True if `dir` looks like a setup-assets folder for this manifest. The frozen
+ * API bundle is the signature file (was the Docker image tar pre-decontainerization). */
 function isValidDir(dir, manifest) {
   try {
-    return !!dir && fs.existsSync(path.join(dir, manifest.image.file));
+    return !!dir && fs.existsSync(path.join(dir, manifest.apiBundle.file));
   } catch { return false; }
 }
 
@@ -89,7 +90,8 @@ function findAssetsDir(manifest) {
   return null;
 }
 
-/** Absolute path to a custom asset (key: 'image' | 'snapshot' | 'projectData'). */
+/** Absolute path to a custom asset
+ * (key: 'apiBundle' | 'neo4j' | 'jre' | 'snapshot' | 'projectData'). */
 function assetPath(dir, manifest, key) {
   return path.join(dir, manifest[key].file);
 }

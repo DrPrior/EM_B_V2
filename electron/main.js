@@ -26,7 +26,7 @@ let quitting = false;
 
 function manifestVersion() {
   try {
-    return JSON.parse(fs.readFileSync(paths.assetsManifestPath(), 'utf8')).image.version;
+    return JSON.parse(fs.readFileSync(paths.assetsManifestPath(), 'utf8')).version;
   } catch {
     return 'latest';
   }
@@ -85,7 +85,7 @@ async function resolveAssetsDir(manifest) {
     await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       message: 'That folder doesn’t contain the setup files.',
-      detail: `Expected to find "${manifest.image.file}" inside it. Pick the "assets" folder from the USB drive.`,
+      detail: `Expected to find "${manifest.apiBundle.file}" inside it. Pick the "assets" folder from the USB drive.`,
     });
   }
   if (dir) assets.saveDir(dir);

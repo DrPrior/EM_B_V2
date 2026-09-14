@@ -32,7 +32,9 @@
           README.txt                       (from docs/USB_README.txt)
           TARGET_MACHINE_PREP.md           (from docs/TARGET_MACHINE_PREP.md)
           assets\                          (the whole release/ folder)
-            emb-hybrid-api-<version>.tar.gz
+            emb-api.zip
+            neo4j-community.zip
+            jre.zip
             neo4j.dump
             project_data.tar.gz
           explainer\                       (from docs/explainer/)
@@ -135,7 +137,7 @@ if ($sig.Status -eq "Valid") {
 }
 
 # ── 4. Verify the source assets ─────────────────────────────────────────────
-$assetKeys = @("image", "snapshot", "projectData")
+$assetKeys = @("apiBundle", "neo4j", "jre", "snapshot", "projectData")
 Write-Host "==> Verifying source assets in release\ ..." -ForegroundColor Cyan
 foreach ($key in $assetKeys) {
     $entry = $manifest.$key
@@ -158,8 +160,8 @@ Copy-Item $installer.FullName (Join-Path $Destination $installer.Name) -Force
 Copy-Item $readmeSrc (Join-Path $Destination "README.txt") -Force
 
 # The provisioning procedure travels with the drive: whoever preps the target
-# machines (install Docker + Ollama, set OLLAMA_*, pull the base models) needs it
-# before the end user ever runs the installer.
+# machines (install Ollama, set OLLAMA_*, pull the base models — Neo4j and the
+# API now ship as bundled assets) needs it before the end user runs the installer.
 if (Test-Path $prepSrc) {
     Copy-Item $prepSrc (Join-Path $Destination "TARGET_MACHINE_PREP.md") -Force
 } else {

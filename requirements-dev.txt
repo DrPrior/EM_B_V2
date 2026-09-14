@@ -1,0 +1,15 @@
+-r requirements.txt
+
+# Linting & formatting (see pyproject.toml for config)
+ruff>=0.6.0
+
+# Test runner (used by `docker exec ... pytest`)
+pytest>=8.0.0
+
+# Required by Starlette's TestClient for in-process FastAPI route testing
+httpx>=0.27.0
+
+# Freezes the API into a native one-dir bundle (emb-api.spec) for the
+# decontainerized desktop app — see docs/DECONTAINERIZE_PLAN.md (Workstream E).
+pyinstaller>=6.0.0
+

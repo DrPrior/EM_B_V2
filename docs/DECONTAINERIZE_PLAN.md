@@ -1,154 +1,159 @@
 # Decontainerization Plan
 
-> **Status: PLANNING / IN PROGRESS.** No refactor code has landed yet. The repo
-> still runs on Docker exactly as the (soon-to-be-legacy) docs describe. This
-> document is the **canonical source of truth** for the migration off Docker —
-> every other doc's "decontainerization" banner points here. Branch:
-> `Decontainerize`.
+> **Status: API DONE — packaging & Electron remain.** The Python API and the
+> dev/pipeline flow now run fully native (no container assumptions). What's left
+> is shipping it to end users without Docker: **freeze the API**, **bundle native
+> Neo4j**, and **rewrite the Electron shell**. This doc is the canonical source of
+> truth; every other doc's "decontainerization" banner points here. Working
+> branch: `Decontainerize`.
 
 ## Why
 
 Docker is no longer permitted on the organization's (UALR) machines, so the app
 must run with **no container runtime at all**. Neo4j and the FastAPI API — the
-only two things still in Docker — move to **native host processes**. Ollama is
-already host-native and does not change.
+only two things that were in Docker — move to **native host processes**. Ollama
+was always host-native.
 
-## Current vs target architecture
+## Target architecture
 
-**Current (Docker):**
-```
-Docker: Neo4j container + API container (uvicorn)   ── api reaches Ollama via host.docker.internal
-Host:   Ollama (native, GPU)
-Electron desktop app supervises the Docker stack (docker load / docker compose)
-```
-
-**Target (native, no Docker):**
 ```
 Electron shell (supervisor)
    ├─ spawns  Neo4j        (native server + bundled JRE)   ── bolt 127.0.0.1:7687
-   ├─ spawns  FastAPI/uvicorn (frozen exe or venv)          ── http 127.0.0.1:8000
+   ├─ spawns  FastAPI API  (frozen exe; uvicorn in dev)     ── http 127.0.0.1:8000
    └─ ensures Ollama       (native, already present)         ── http 127.0.0.1:11434
 ```
 
-`host.docker.internal` disappears — everything is `127.0.0.1`. That removes the
-`OLLAMA_HOST=0.0.0.0` LAN exposure and the entire firewall-hardening burden: a
-native API reaches Ollama on loopback, so Ollama returns to binding `127.0.0.1`
-only. This is a security win, not just a lateral move.
+Everything is `127.0.0.1`. `host.docker.internal` is gone, which also removes the
+`OLLAMA_HOST=0.0.0.0` LAN exposure and the entire firewall-hardening burden —
+Ollama returns to binding loopback only.
 
-## Key facts that make this feasible
+## Progress
 
-- **`src/` is barely Docker-coupled.** The only Docker-isms are a default string
-  (`data_root=/app/project_data`), docstrings mentioning `host.docker.internal`,
-  and `DB_URI` being env-provided. See `src/core/config.py`,
-  `src/services/ollama_bootstrap.py`.
-- **No APOC / GDS dependency.** Vector search (`db.index.vector.queryNodes`,
-  `vector.similarity.cosine`) is Neo4j core — native Neo4j needs no plugins.
-- **`config.ollama_base_url` already defaults to `http://localhost:11434`**, so
-  the native app works with defaults once the container override is dropped.
-- The intent is pre-recorded in `HYBRID_SETUP.md` ("Run the API natively (the
-  real long-term fix)… remains unbuilt; for a fleet of roaming, non-technical-
-  user laptops it is still the preferred fix").
+**Landed (on `Decontainerize`):**
+- **A — app native-safety:** `DB_URI`/`DATA_ROOT` env-driven; POSIX-normalized
+  `File.filepath`; `config` `extra="ignore"`; `_file_url` separator-robust; the
+  `graph.py` syntax fix.
+- **B — native dev stack:** `.env.example` native-first, `scripts/dev-up.ps1`,
+  `docs/NATIVE_DEV.md`. Neo4j runs via Neo4j Desktop in dev.
+- **Embedding swap:** `qwen3-embedding:4b` (2560-d) → `embeddinggemma:latest`
+  (768-d); vector index + Modelfile + config + tests updated.
+- **Parallel enrichment:** Pass 2 thread-pooled (`enrichment_concurrency`,
+  default 4) — ~2.3× on the RTX 4000, ~10 h → ~4.5 h.
+- **`cryptography` dependency** added (AES-encrypted PDFs were silently dropped).
+- **API decontainerization finish:** admin endpoints default to `settings.data_root`;
+  container references removed from docstrings; **`src/core/paths.py`** added with
+  `sys.frozen`/`_MEIPASS`-aware `resource_root()`/`modelfile_path()`/`static_dir()`,
+  and `ollama_bootstrap` + `main.py` now resolve Modelfiles and the static UI
+  through it (frozen-ready). The Docker files (`Dockerfile*`, `docker-compose*.yml`)
+  were deleted.
+- Graph **rebuilt** on native Neo4j (`2026.07.01`): 10,360 chunks at 768-d, vector
+  index `chunk_vector_idx` ONLINE.
 
-## The decision that drives everything: how to ship the runtimes
+**Remaining: C (bundle Neo4j), D (Electron rewrite), E (build pipeline).**
 
-Fleet machines have **no Docker and IT blocks unsigned installers**. Everything
+> ⚠️ **The Electron app is currently non-functional.** It still references the
+> deleted Docker artifacts — `electron/package.json` lists
+> `../docker-compose.desktop.yml` in `extraResources` (so `npm run dist` fails),
+> and `lib/docker.js` / `lib/compose.js` / `lib/snapshot.js` / `lib/firstrun.js` /
+> `supervisor.js` are Docker-wired. It must be rewritten (Workstream D) before it
+> runs again.
+
+## How the runtimes ship
+
+Fleet machines have **no Docker and IT blocks unsigned installers** — everything
 shipped must be signed or installer-free.
 
-- **Python API — recommended: freeze with PyInstaller (one-dir) → `emb-api.exe`
-  + `_internal/`, code-signed with the UALR certificate already being staged.**
-  End users never touch Python/pip/venv; it's a folder to copy, not an
-  installer. *Biggest technical risk: freezing `unstructured`* (optional parsers
-  + data files PyInstaller misses). Validate a frozen build ingests PDF/PPTX/DOCX
-  **before** committing to this. Alternative: ship embeddable CPython 3.12 + a
-  pre-built `site-packages` as a plain folder (no installer).
-- **Neo4j — ship the Community tarball + a bundled JRE**, unpacked (not a Windows
-  service — that needs admin). Supervisor runs `neo4j console` as a child.
+- **Python API — PyInstaller one-dir → `emb-api.exe` + `_internal/`, code-signed
+  with the UALR cert.** End users copy a folder, not run an installer.
+  - **The biggest freeze risk is gone:** `unstructured` is declared in
+    `requirements.txt` but **never imported** — the code parses with
+    `pypdf` / `python-docx` / `python-pptx` (+ `cryptography`). Dropping
+    `unstructured` removes the optional-parser/data-file freeze hazard; the
+    remaining parsers freeze cleanly.
+- **Neo4j — Community zip + bundled JRE**, unpacked (no admin service install).
+  Supervisor runs `neo4j console` as a child.
 
-**This packaging choice is still OPEN — confirm before implementing Workstream D.**
+## Remaining workstreams (detail)
 
-## Workstreams
-
-### A. App code (small, do first)
-1. `DB_URI` → `bolt://127.0.0.1:7687` (env only; no code change —
-   `src/database/connection.py` reads it from env).
-2. Drop the `OLLAMA_BASE_URL=host.docker.internal` override; the
-   `http://localhost:11434` default in `config.py` works natively.
-3. `data_root` (`config.py`): change default off `/app/project_data` to a host
-   path, or always pass via env. The `/files` citation endpoint resolves against
-   it — must point at the real extracted corpus dir or downloads 404.
-4. `ollama_bootstrap._PROJECT_ROOT` assumes `/app`; add a
-   `sys.frozen`/`sys._MEIPASS`-aware lookup so the Modelfiles are found when
-   frozen. Keep the Modelfiles next to the exe.
-
-### B. Native dev stack (fast win, validates the app natively)
-Replace `docker-compose.yml` with a native dev flow (or `scripts/dev-up.ps1`):
-native Neo4j + `uvicorn src.main:app --reload` in a conda/venv + Ollama.
-`.env`: `DB_URI=bolt://127.0.0.1:7687`, `NEO4J_AUTH`,
-`DATA_ROOT=<repo>/project_data`. Run the pipeline directly
-(`python -m pipeline.ingest`) instead of `docker exec`.
-
-### C. Neo4j native
-- **Version lock (hard):** the shipped `neo4j.dump` was exported from
-  **2026.04.0**; `neo4j-admin database load` refuses a store-format mismatch, so
-  the bundled native Neo4j must be the same 2026.04.0 line. Re-export the dump on
-  any bump.
-- **Password-before-init (hard):** today the random password is baked into the
-  Docker volume on first init. Natively, the equivalent is the Neo4j **data
-  directory** — set the password with `neo4j-admin dbms set-initial-password`
-  **before first start**, then load the dump, or auth breaks the same way.
-- Bundle a JRE (17/21 for this line); don't assume a host Java.
+### C. Bundle native Neo4j + JRE
+- Ship **Neo4j Community (unpacked zip) + a bundled JRE 17/21** under the app's
+  resources; no admin installer.
+- **Store-format version = `2026.07.01`.** A **new dump is being regenerated** from
+  the live `2026.07.01` dev DB, so bundle that same Neo4j line — `neo4j-admin
+  database load` refuses a store-format mismatch. (Supersedes the old `2026.04.0`
+  dump in `release/`.)
+- First-run order: `neo4j-admin dbms set-initial-password <random>` **before** the
+  first start → `neo4j-admin database load` the dump (offline) → `neo4j console`.
+  Password-before-init is mandatory or auth breaks (same trap the Docker volume had).
+- Config: bind bolt + http to `127.0.0.1`; data dir + modest heap/pagecache under
+  the app's userData dir.
 
 ### D. Electron desktop rewrite (the bulk)
 | File | Action |
 |---|---|
-| `electron/lib/docker.js` | **Delete** — no Docker detection/install/load. |
-| `electron/lib/compose.js` | **Replace** with a native process manager (`neo4j.js`) that spawns/stops Neo4j + uvicorn. |
-| `electron/supervisor.js` | Rewrite `start`/`stop`/`quickStart`: launch Neo4j → wait for bolt → launch API exe → poll `/health`; kill full process tree on quit (Windows `taskkill /T` or `tree-kill`). |
-| `electron/lib/snapshot.js` | Keep `neo4j-admin database load`, but run **native** neo4j-admin (stop, load, restart) instead of `compose runOneOff`. |
-| `electron/lib/firstrun.js` | Drop `docker` + `image` (docker load) steps; add `neo4j` + `runtime` steps. New order: `gpu → ollama → models → neo4j → runtime → data → snapshot → start`. |
-| `electron/lib/envfile.js` | Keep random-password logic; emit **process env** for children, not compose-interpolation vars. Drop `APP_VERSION`/`PROJECT_DATA_DIR` compose-isms. |
-| `electron/main.js` | Mostly unchanged — still loads `http://127.0.0.1:8000` once healthy. |
+| `electron/lib/docker.js` | **Delete** — no Docker detect/install/load. |
+| `electron/lib/compose.js` | **Replace** with a native process manager (`lib/procs.js`): spawn/stop `neo4j console` + `emb-api.exe`, with bolt / `/health` readiness probes. |
+| `electron/supervisor.js` | Rewrite `start`/`stop`/`quickStart`: Neo4j → wait bolt → API → poll `/health`; kill child trees on quit (`taskkill /T /F` or `tree-kill`); orphan + port-in-use cleanup (7687/8000/7474). |
+| `electron/lib/snapshot.js` | Keep `neo4j-admin database load`, but drive the **bundled native** neo4j-admin (stop→load→start), not `compose runOneOff`; marker keyed on data-dir path. |
+| `electron/lib/firstrun.js` | New step order `gpu → ollama → models → neo4j → runtime → data → snapshot → start`; drop the `docker` and `image` (`docker load`) steps; add `neo4j` (unpack + set password) and `runtime` (unpack API bundle) steps. |
+| `electron/lib/envfile.js` | Keep the stable random password; emit **process env** for children (`NEO4J_AUTH`, `DB_URI=bolt://127.0.0.1:7687`, `DATA_ROOT=<extracted corpus>`); drop compose vars (`APP_VERSION`, `PROJECT_DATA_DIR`). |
+| `electron/lib/ollamaenv.js` | **Drop `OLLAMA_HOST=0.0.0.0`** (native API → loopback); keep `KEEP_ALIVE=-1`, `NUM_PARALLEL` (parallel enrichment), `MAX_LOADED_MODELS`, flash-attn/kv-cache, `IGPU_ENABLE`. Retires the firewall-hardening story. |
+| `electron/lib/paths.js` | Drop `composePath()`; add `neo4jDir()`, `apiExeDir()`, `jreDir()`. |
+| `electron/main.js` | Mostly unchanged — loads `127.0.0.1:8000` on healthy; before-quit stops the native procs. |
+| `lib/ollama.js`, `modelfile.js`, `gpu.js`, `assets.js`, `download.js`, `exec.js` | Largely reusable as-is (`ollama.js` VARIANTS already point at `embeddinggemma:latest`). |
 
 **Pitfall — process lifecycle:** Docker gave restart policies,
 `depends_on: service_healthy` ordering, and clean teardown for free. Natively you
 own startup ordering (Neo4j ready before API), crash detection/restart, orphan
-cleanup on relaunch, and port-in-use collisions (7687/8000/7474) from a crashed
-prior run. Use real readiness probes (bolt connect, not just process-alive).
+cleanup on relaunch, and port-in-use collisions. Use real readiness probes (bolt
+connect + `/health`, not just process-alive).
 
-### E. Build & release pipeline
-Replace `Dockerfile`, `Dockerfile.prod`, and the image half of
-`electron/scripts/build-release.ps1` (and `build-image.ps1`) with a
-**PyInstaller build + signing** step. New shipped assets: signed API bundle,
-Neo4j+JRE folder, `neo4j.dump`, `project_data.tar.gz`, Modelfiles. Update
-`electron/resources/assets.manifest.json` + SHA-256 checks (drop `image` tar; add
-runtime/neo4j entries). Keep the USB delivery model — it's orthogonal.
-
-### F. Docs, tests, scripts
-- `CLAUDE.md`, `docs/HYBRID_SETUP.md`, `electron/README.md`,
-  `docs/TARGET_MACHINE_PREP.md`, `docs/USB_README.txt`: reframed to native (this
-  pass). The firewall-hardening section becomes moot (loopback only).
-- Tests: `docker exec … pytest` → `pytest` in the venv. Check
-  `tests/integration/` for hardcoded `neo4j:7687` / `host.docker.internal`.
-- `scripts/export-graph.ps1` / `import-graph.ps1`: drive native `neo4j-admin`.
-- Retire `scripts/harden-ollama-firewall.ps1`.
+### E. Build & release pipeline + packaging cleanup
+- **Freeze entry point:** add `run_api.py` calling `uvicorn.run(src.main.app,
+  host="127.0.0.1", port=8000)` — pass the app object (not the import string),
+  no `--reload`, so it works frozen.
+- **PyInstaller `.spec`** (checked in): one-dir; `--add-data` places `Modelfile`,
+  `Modelfile.embeddings`, and `src/static` under the resource root — the exact
+  contract `src/core/paths.py` expects. Expect `--collect-submodules uvicorn`
+  (+ hidden imports) for uvicorn's dynamic loop/protocol/logging imports.
+- **`requirements.txt`:** drop unused `unstructured`.
+- **`electron/scripts/build-release.ps1`:** replace the `docker build`/`docker
+  save` half with a PyInstaller run (zip the API bundle) + stage the Neo4j+JRE
+  zip; keep the **re-exported** `neo4j.dump` + `project_data.tar.gz`.
+- **`electron/package.json`:** remove the `../docker-compose.desktop.yml`
+  `extraResources` entry (deleted file → breaks builds); fix the "Provisions
+  Docker…" description; bump version. Signing (`win.signtoolOptions`) is
+  configured — needs the cert.
+- **`electron/resources/assets.manifest.json` + `lib/assets.js`:** drop the
+  `image` tar entry; add `apiBundle` + `neo4j` entries with SHA-256; update
+  verification. Delete the stale `release/emb-hybrid-api-*.tar.gz`.
+- **Delivery/docs:** `scripts/stage-usb.ps1`, `docs/USB_README.txt`,
+  `docs/TARGET_MACHINE_PREP.md` — drop Docker install/prep; ship the API bundle +
+  Neo4j as assets; update the first-run step list. Retire the firewall-hardening
+  section in `HYBRID_SETUP.md`. `scripts/export-graph.ps1`/`import-graph.ps1` →
+  drive native `neo4j-admin`.
 
 ## Top pitfalls (consolidated)
-1. **Freezing `unstructured`** — the single biggest unknown; spike it first.
-2. **Neo4j store-format version lock** to 2026.04.0; re-export on any bump.
-3. **Neo4j password before first init**, then load dump.
-4. **IT's unsigned-installer block** — sign everything or ship installer-free;
-   gated on the UALR cert already being staged.
-5. **Process supervision** you now own (ordering, readiness, restart, teardown,
-   port collisions).
-6. **Bundle Java** — don't assume a host JRE.
-7. **Don't re-download/re-execute runtimes** on pre-provisioned machines
+1. **Neo4j store-format version lock** — bundle `2026.07.01` to match the new dump.
+2. **Neo4j password before first init**, then load.
+3. **IT's unsigned-installer block** — sign the API exe *and* the installer;
+   gated on the UALR cert being staged.
+4. **Process supervision** you now own (ordering, readiness, restart, teardown,
+   orphans, ports).
+5. **Bundle a JRE** — don't assume host Java.
+6. **Don't re-download/re-execute runtimes** on pre-provisioned machines
    (endpoint-security dropper pattern) — use in place, verify by hash.
+7. **Size** — API bundle + Neo4j + JRE + models + corpus grows the installer/USB.
+
+(`unstructured` freeze risk — retired: the dep is unused and being dropped.)
 
 ## Suggested sequencing
-1. **A + B** — app tweaks + native dev stack. Proves the app runs with zero
-   containers.
-2. **Packaging spike** — PyInstaller the API (confirm `unstructured` works
-   frozen); bundle native Neo4j + JRE and load the dump by hand. De-risks the two
-   unknowns before any Electron work.
-3. **C + D** — Electron supervisor/wizard + build pipeline.
-4. **E/F** — finish build pipeline, docs, tests, clean-machine first-run test.
+1. **Packaging spike (low risk now):** drop `unstructured`; write `run_api.py` +
+   the PyInstaller spec; prove the frozen exe serves the UI and ingests
+   PDF/PPTX/DOCX.
+2. **Bundle Neo4j + JRE**; set password, load the (new `2026.07.01`) dump, start
+   natively by hand.
+3. **Electron rewrite** — procs/supervisor/firstrun/snapshot/envfile/ollamaenv/
+   paths; delete `docker.js`.
+4. **Build pipeline** — `build-release.ps1`, `package.json`, manifest, signing.
+5. **Docs + a clean-machine first-run test.**

@@ -62,6 +62,50 @@ function firstRunMarkerPath() {
   return path.join(userDataDir(), 'first-run-complete.json');
 }
 
+// --- Native runtime locations (decontainerized) ---------------------------
+// The bundled Neo4j server, its JRE, and the frozen API bundle are unpacked
+// under userData by the first-run provisioning (Workstream C/D). The build
+// pipeline (Workstream E) must produce these layouts:
+//   <userData>/neo4j/bin/neo4j(.bat) + neo4j-admin(.bat), data/, conf/
+//   <userData>/jre/            (bundled JRE; used as JAVA_HOME)
+//   <userData>/api/emb-api(.exe) + _internal/   (PyInstaller one-dir bundle)
+
+const _WIN = process.platform === 'win32';
+
+/** Root of the unpacked native Neo4j server. */
+function neo4jHomeDir() {
+  return path.join(userDataDir(), 'neo4j');
+}
+
+function neo4jBinDir() {
+  return path.join(neo4jHomeDir(), 'bin');
+}
+
+/** `neo4j` launcher — run with `console` to start the server in-process. */
+function neo4jConsolePath() {
+  return path.join(neo4jBinDir(), _WIN ? 'neo4j.bat' : 'neo4j');
+}
+
+/** `neo4j-admin` launcher — used for the offline snapshot load. */
+function neo4jAdminPath() {
+  return path.join(neo4jBinDir(), _WIN ? 'neo4j-admin.bat' : 'neo4j-admin');
+}
+
+/** Bundled JRE home; exported to child processes as JAVA_HOME for Neo4j. */
+function jreHomeDir() {
+  return path.join(userDataDir(), 'jre');
+}
+
+/** Unpacked PyInstaller one-dir bundle of the API. */
+function apiDir() {
+  return path.join(userDataDir(), 'api');
+}
+
+/** The frozen API executable inside apiDir(). */
+function apiExePath() {
+  return path.join(apiDir(), _WIN ? 'emb-api.exe' : 'emb-api');
+}
+
 module.exports = {
   resourcesRoot,
   composePath,
@@ -73,4 +117,11 @@ module.exports = {
   snapshotDir,
   envFilePath,
   firstRunMarkerPath,
+  neo4jHomeDir,
+  neo4jBinDir,
+  neo4jConsolePath,
+  neo4jAdminPath,
+  jreHomeDir,
+  apiDir,
+  apiExePath,
 };

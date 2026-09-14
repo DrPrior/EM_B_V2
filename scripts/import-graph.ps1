@@ -2,46 +2,44 @@
 <#
 .SYNOPSIS
     Restore a shared Neo4j graph snapshot (snapshot/neo4j.dump) into the local
-    Docker volume, so the app runs with a fully-populated graph without having to
-    re-run the ingest -> load_manifest -> enrich pipeline.
+    native Neo4j store, so the app runs with a populated graph without re-running
+    the ingest -> load_manifest -> enrich pipeline.
 
 .DESCRIPTION
-    Counterpart to export-graph.ps1. Run this ONCE after cloning the repo and
-    dropping the shared neo4j.dump into a `snapshot/` folder at the repo root,
-    BEFORE (or instead of) your first `docker compose up`.
+    Native (decontainerized) counterpart to export-graph.ps1: drives the host's
+    `neo4j-admin database load` directly. Neo4j must be OFFLINE for the load, and
+    this script does NOT manage the server lifecycle — stop the database yourself
+    first (it refuses to run while bolt 127.0.0.1:7687 is open). `--overwrite-
+    destination=true` REPLACES the local database, so any existing local graph is
+    discarded. Start Neo4j again afterward; the vector index rebuilds on startup.
 
-    It loads the dump into the em_b_v2_neo4j_data volume using neo4j-admin
-    database load in a throwaway container. --overwrite-destination=true means an
-    existing local database is REPLACED, so anything currently in your local
-    graph is discarded.
+    You still need host-native Ollama to *query* the app — the snapshot only skips
+    the rebuild. The dump must match the Neo4j major line and, for Community, be a
+    record format (aligned/standard), not `block`.
 
-    You still need host-native Ollama running to *query* the app afterward — the
-    snapshot only saves you the rebuild, not the chat-time LLM dependency. See
-    docs/HYBRID_SETUP.md.
+.PARAMETER Neo4jAdmin
+    Path to neo4j-admin (.bat on Windows). Required.
 
-    NOTE: this must run the SAME pinned Neo4j image the dump was created with (see
-    docker-compose.yml `image:` line).
+.PARAMETER JavaHome
+    JAVA_HOME for neo4j-admin (pass Neo4j Desktop's bundled JRE if java isn't on PATH).
 
 .PARAMETER Database
-    The database name to load into. Defaults to "neo4j".
-
-.PARAMETER Up
-    After loading, bring the full stack up (`docker compose up -d`).
+    Database to load into. Defaults to "neo4j".
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\scripts\import-graph.ps1 -Up
+    pwsh -File scripts/import-graph.ps1 `
+      -Neo4jAdmin "$env:USERPROFILE\.Neo4jDesktop2\Data\dbmss\dbms-XXId\bin\neo4j-admin.bat" `
+      -JavaHome  "$env:USERPROFILE\.Neo4jDesktop2\Cache\runtime\zulu21..."
 #>
 [CmdletBinding()]
 param(
-    [string]$Database = "neo4j",
-    [switch]$Up
+    [Parameter(Mandatory = $true)][string]$Neo4jAdmin,
+    [string]$JavaHome,
+    [string]$Database = "neo4j"
 )
 
 $ErrorActionPreference = "Stop"
-
 $repoRoot = Split-Path -Parent $PSScriptRoot
-Set-Location $repoRoot
-
 $snapshotDir = Join-Path $repoRoot "snapshot"
 $dump = Join-Path $snapshotDir "$Database.dump"
 if (-not (Test-Path $dump)) {
@@ -50,21 +48,14 @@ if (-not (Test-Path $dump)) {
 $sizeMB = [math]::Round((Get-Item $dump).Length / 1MB, 1)
 Write-Host "==> Found $dump ($sizeMB MB)." -ForegroundColor Cyan
 
-Write-Host "==> Stopping neo4j if it is running (load requires the database offline)..." -ForegroundColor Cyan
-docker compose stop neo4j 2>$null
+$boltUp = (Test-NetConnection 127.0.0.1 -Port 7687 -WarningAction SilentlyContinue).TcpTestSucceeded
+if ($boltUp) { throw "Neo4j is running (bolt 127.0.0.1:7687 is open). Stop the database first — an offline load is required." }
+if (-not (Test-Path $Neo4jAdmin)) { throw "neo4j-admin not found at $Neo4jAdmin." }
+if ($JavaHome) { $env:JAVA_HOME = $JavaHome }
 
-Write-Host "==> Loading '$Database' into the local volume (existing data is overwritten)..." -ForegroundColor Cyan
-docker compose run --rm --no-deps -v "${snapshotDir}:/snapshot" neo4j `
-    neo4j-admin database load $Database --from-path=/snapshot --overwrite-destination=true
+Write-Host "==> Loading '$Database' (existing local data is overwritten)..." -ForegroundColor Cyan
+& $Neo4jAdmin database load $Database --from-path=$snapshotDir --overwrite-destination=true
 if ($LASTEXITCODE -ne 0) { throw "neo4j-admin database load failed." }
 
 Write-Host ""
-Write-Host "Done. Graph restored into em_b_v2_neo4j_data." -ForegroundColor Green
-
-if ($Up) {
-    Write-Host "==> Bringing the stack up..." -ForegroundColor Cyan
-    docker compose up -d
-}
-else {
-    Write-Host "Next: start the stack with  docker compose up -d  (host Ollama must be running)." -ForegroundColor Green
-}
+Write-Host "Done. Graph restored. Start Neo4j again (the vector index rebuilds on startup); host Ollama must be running to query." -ForegroundColor Green

@@ -1,46 +1,42 @@
 ================================================================================
  EM KNOWLEDGE ASSISTANT — Installation from this USB drive
- Version 0.2.0 (Windows)
+ Version <version> (Windows)
 ================================================================================
 
- *** MAINTAINER NOTE — NOT FOR THE CURRENT BUILD ***
- The app is being decontainerized (Docker removed). This end-user README still
- describes the CURRENT Docker-based build. When the native build ships, update
- it: remove the Docker step and the "Application image" step from the setup
- sequence, and drop the "Docker Desktop ... start automatically" line under
- AFTER SETUP. See docs/DECONTAINERIZE_PLAN.md. (Delete this note before shipping.)
-================================================================================
+ (Maintainer: replace <version> with the shipped installer version before
+ staging the drive.)
+
 
 WHAT THIS IS
 ------------
 A private knowledge assistant that runs entirely on your own computer. Your
-questions and documents never leave the machine — the language models and the
-document graph all run locally.
+questions and documents never leave the machine — the language models, the
+database, and the document graph all run locally.
 
 
 BEFORE YOU START — please read
 ------------------------------
-This computer should already have been prepared for you: Docker, Ollama, and
-the language models installed ahead of time. If so, setup runs entirely from
-this USB drive and needs no internet at all.
+This computer should already have been prepared for you: Ollama and the
+language models installed ahead of time. If so, setup runs entirely from this
+USB drive and needs no internet at all.
 
 You need:
 
   * Windows 10 or 11, 64-bit
   * About 40 GB of free disk space
-  * Permission to install software (administrator rights). If this is a
-    work-managed computer, check with IT first.
+  * Permission to install software. If this is a work-managed computer, check
+    with IT first — the app must be code-signed for your machines to allow it.
   * Time. First-time setup takes roughly 10-20 minutes. You can leave it
     running.
 
 Leave this USB drive plugged in for the whole of first-time setup. The app
-reads about 1 GB of prepared data from it. Once setup finishes you can remove
-the drive and it is never needed again.
+reads its prepared data from it. Once setup finishes you can remove the drive
+and it is never needed again.
 
 If the computer was NOT prepared in advance, setup still works, but it has to
-download Docker, Ollama, and about 10 GB of language models — so it needs an
-internet connection and takes 30-60 minutes instead. Everything else is the
-same, and the app is fully offline once setup finishes either way.
+download Ollama and about 10 GB of language models — so it needs an internet
+connection and takes 30-60 minutes instead. Everything else is the same, and
+the app is fully offline once setup finishes either way.
 
 
 INSTALLING
@@ -49,53 +45,44 @@ INSTALLING
 
 2. Double-click:
 
-       EM Knowledge Assistant-Setup-0.2.0.exe
+       EM Knowledge Assistant-Setup-<version>.exe
 
-3. Windows will warn you: "Windows protected your PC" (SmartScreen). This is
-   expected — the installer is not code-signed yet. Click "More info", then
-   "Run anyway".
+3. Choose an install location (the default is fine) and let it install.
 
-4. Choose an install location (the default is fine) and let it install.
-
-5. Launch "EM Knowledge Assistant" from the Start menu. A setup window opens
+4. Launch "EM Knowledge Assistant" from the Start menu. A setup window opens
    and walks through eight steps on its own:
 
-       Graphics check -> Docker -> Ollama -> Language models -> Application
-       image -> Source documents -> Knowledge graph -> Start
+       Graphics check -> Ollama -> Language models -> Database engine ->
+       Application -> Source documents -> Knowledge graph -> Start
 
    Just watch it. Each step shows its own progress. On a prepared computer the
-   first four steps go by quickly — they find what they need already there and
+   first three steps go by quickly — they find what they need already there and
    move on.
 
-6. IMPORTANT — if Docker Desktop asks to restart your computer, restart, then
-   open "EM Knowledge Assistant" again. Setup picks up exactly where it left
-   off — nothing is lost and nothing needs redoing. (On a prepared computer
-   this should not come up.)
-
-7. When setup finishes, the assistant opens and you can start asking
-   questions.
+5. When setup finishes, the assistant opens and you can start asking questions.
 
 
 AFTER SETUP
 -----------
 Open "EM Knowledge Assistant" from the Start menu like any other program. It
-takes 30-60 seconds to start up while the background services come online.
-No internet needed.
+takes 30-60 seconds to start up while the local database and services come
+online. No internet needed.
 
-Docker Desktop and Ollama are installed alongside it and start automatically.
-Leave them alone — the assistant manages them.
+Ollama starts automatically in the background; the assistant starts and stops
+the database and its own service for you. Leave them alone — the app manages
+them.
 
 
 WHAT'S ON THIS DRIVE
 --------------------
-  EM Knowledge Assistant-Setup-0.2.0.exe   The installer — start here.
+  EM Knowledge Assistant-Setup-<version>.exe   The installer — start here.
 
-  assets\                                  Prepared data the setup reads
-                                           (the application, the document
-                                           collection, and the prebuilt
-                                           knowledge graph). Do not rename,
-                                           move, or open these — setup finds
-                                           them automatically.
+  assets\                                  Prepared data the setup reads (the
+                                           application, the database engine, the
+                                           document collection, and the prebuilt
+                                           knowledge graph). Do not rename, move,
+                                           or open these — setup finds them
+                                           automatically.
 
   explainer\index.html                     Technical documentation of how the
                                            system works. Open in any browser.
@@ -107,6 +94,11 @@ WHAT'S ON THIS DRIVE
 
 IF SOMETHING GOES WRONG
 -----------------------
+"Blocked by your system administrator" / the installer won't run
+    The app isn't code-signed for your organization's machines yet. This is a
+    policy block that Administrator rights do NOT bypass — contact whoever gave
+    you the drive; it needs a signed build.
+
 "Setup can't find the assets folder"
     The USB drive was unplugged, or the folder was moved. Plug the drive back
     in and click Retry. If it still can't find it, a folder picker appears —

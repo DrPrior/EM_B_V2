@@ -1,20 +1,28 @@
 'use strict';
 
 /**
- * Guided first-run provisioning orchestrator (USB delivery).
+ * Guided first-run provisioning orchestrator (native, USB delivery).
  *
  * Runs the wizard steps in order, emitting progress events the renderer renders
- * as a checklist. Every step is idempotent and re-entrant: if Docker Desktop
- * required a reboot, the user relaunches the app and provisioning resumes where
- * it left off (each step re-checks whether its work is already done).
+ * as a checklist. Every step is idempotent and re-entrant: if the app is
+ * relaunched mid-setup, each step re-checks whether its work is already done and
+ * resumes.
  *
- * The three heavy custom assets (image tar, snapshot, corpus) are read from a
- * local `assets/` folder on the USB (`assetsDir`, resolved by the caller). The
- * base models still come from the internet. Docker and Ollama are used in place
- * when already present — their installers are fetched only if genuinely missing,
- * so a fleet with both pre-installed never downloads or executes an installer.
+ * Decontainerized: there is no Docker and no prebuilt image. The heavy custom
+ * assets are read from a local `assets/` folder on the USB (`assetsDir`):
+ *   - apiBundle : the frozen PyInstaller one-dir API (emb-api.exe + _internal/)
+ *   - neo4j     : Neo4j Community server (bin/, conf/, ... at the zip root)
+ *   - jre       : the bundled JRE (used as JAVA_HOME for Neo4j)
+ *   - snapshot  : the prebuilt graph dump (record/aligned format)
+ *   - projectData : the source corpus (a top-level project_data/ dir)
+ * Base models still come from the internet. Ollama is used in place if present.
  *
- * Steps: gpu → docker → ollama → models → image → data → snapshot → start.
+ * Build-pipeline contract (Workstream E must satisfy these when zipping assets):
+ *   - apiBundle unzips to <userData>/api/emb-api.exe + _internal/ (contents at root)
+ *   - neo4j unzips to <userData>/neo4j/bin/... (contents at root, not nested)
+ *   - jre   unzips to <userData>/jre/bin/java
+ *
+ * Steps: gpu → ollama → models → neo4j → runtime → data → snapshot → start.
  */
 
 const fs = require('fs');
@@ -22,29 +30,31 @@ const path = require('path');
 
 const paths = require('./paths');
 const gpu = require('./gpu');
-const docker = require('./docker');
 const ollama = require('./ollama');
 const ollamaenv = require('./ollamaenv');
 const snapshot = require('./snapshot');
-const compose = require('./compose');
 const assets = require('./assets');
 const supervisor = require('../supervisor');
 const { ensureEnvFile } = require('./envfile');
 const { runStream } = require('./exec');
 
+/** Kept for main.js compatibility; no longer thrown now that Docker is gone. */
 class RebootRequiredError extends Error {}
 
 function loadManifest() {
   return JSON.parse(fs.readFileSync(paths.assetsManifestPath(), 'utf8'));
 }
 
-function imageTag(manifest) {
-  return `emb-hybrid-api:${manifest.image.version}`;
+/** Extract a .zip (Neo4j / JRE / API bundle). `tar` on Win10+/macOS reads zips. */
+async function extractZip(archivePath, destDir, onLine = () => {}) {
+  fs.mkdirSync(destDir, { recursive: true });
+  const { code } = await runStream('tar', ['-xf', archivePath, '-C', destDir], {}, onLine);
+  if (code !== 0) throw new Error(`Failed to extract ${archivePath}`);
 }
 
+/** Extract a .tar.gz (the source corpus). */
 async function extractTarGz(archivePath, destDir, onLine = () => {}) {
   fs.mkdirSync(destDir, { recursive: true });
-  // `tar` ships with Windows 10+ (bsdtar) and macOS.
   const { code } = await runStream('tar', ['-xzf', archivePath, '-C', destDir], {}, onLine);
   if (code !== 0) throw new Error(`Failed to extract ${archivePath}`);
 }
@@ -62,39 +72,14 @@ async function runFirstRun(emit, assetsDir) {
   const g = await gpu.detect();
   step('gpu', 'done', `Acceleration: ${g.accel}`);
 
-  // 2. Docker Desktop (installer downloaded online only if missing).
-  step('docker', 'active', 'Checking for Docker…');
-  if (!(await docker.isInstalled())) {
-    step('docker', 'active', 'Installing Docker Desktop…');
-    await docker.installDockerDesktop(manifest, (p) =>
-      step('docker', 'active', p.message || p.line || 'Installing Docker Desktop…',
-        p.fraction ?? null));
-  }
-  if (!(await docker.isDaemonRunning())) {
-    step('docker', 'active', 'Waiting for Docker to start…');
-    if (!(await docker.waitForDaemon(60, 2000))) {
-      step('docker', 'needs-user',
-        'Docker Desktop needs to finish installing (this may require a restart). ' +
-        'Complete it, ensure Docker is running, then reopen this app.');
-      throw new RebootRequiredError('Docker daemon not running');
-    }
-  }
-  step('docker', 'done', 'Docker is running.');
-
-  // 3. Ollama (host-native, for GPU inference).
+  // 2. Ollama (host-native, for GPU inference).
   step('ollama', 'active', 'Checking for Ollama…');
   if (!(await ollama.isRunning())) {
-    // Not answering is not the same as not installed. On a machine where Ollama
-    // was pre-installed but never launched, start it — reinstalling over a
-    // working install is both wrong and the kind of download-and-execute that
-    // endpoint security flags.
     if (await ollama.isInstalled()) {
       step('ollama', 'active', 'Starting Ollama…');
       if (!(await ollama.start((p) => step('ollama', 'active', p.message)))) {
         step('ollama', 'needs-user',
-          'Ollama is installed but is not running and could not be started ' +
-          'automatically. Open Ollama (Start menu on Windows, Applications on ' +
-          'macOS), then click Retry.');
+          'Ollama is installed but could not be started automatically. Open Ollama, then click Retry.');
         throw new Error('Ollama is installed but could not be started');
       }
     } else {
@@ -103,24 +88,18 @@ async function runFirstRun(emit, assetsDir) {
         step('ollama', 'active', p.message || p.line || 'Installing Ollama…', p.fraction ?? null));
     }
   }
-  // Persist + apply the host env vars the container needs to reach Ollama
-  // (OLLAMA_HOST=0.0.0.0) and to keep both models warm. Idempotent: a no-op once
-  // set. If it had to reconfigure but couldn't relaunch Ollama itself, the user
-  // must restart Ollama before the container step can reach it.
+  // Persist + apply the host env vars Ollama needs. Native: NO OLLAMA_HOST=0.0.0.0
+  // (the API reaches Ollama over loopback); ollamaenv keeps the warmth/perf vars.
   step('ollama', 'active', 'Configuring Ollama for the app…');
   const envRes = await ollamaenv.ensure((msg) => step('ollama', 'active', msg), g);
   if (envRes.changed && !envRes.restarted) {
     step('ollama', 'needs-user',
-      'Ollama needs to restart to accept connections from the app. Quit Ollama ' +
-      '(menu bar / system tray) and reopen it, then click Retry.');
+      'Ollama needs to restart to apply required settings. Quit Ollama and reopen it, then click Retry.');
     throw new Error('Ollama must be restarted to apply required settings');
   }
   step('ollama', 'done', 'Ollama is running.');
 
-  // 4. Models. The ~10 GB download only happens when a base model is genuinely
-  // missing; where the bases were pre-pulled this is a local variant build, and
-  // where the variants exist too it is a no-op. Open with a neutral message and
-  // let the per-model progress below report what is actually happening.
+  // 3. Models — pull bases only if missing, then build the custom variants.
   step('models', 'active', 'Checking language models…');
   await ollama.ensureModels((p) => {
     const label = p.stage === 'pull' ? `Downloading ${p.model} (large — first run only)` :
@@ -130,37 +109,61 @@ async function runFirstRun(emit, assetsDir) {
   });
   step('models', 'done', 'Models ready.');
 
-  // Env file (needed by every compose call below).
-  const { path: envPath } = ensureEnvFile({ appVersion: manifest.image.version });
+  // Env file (stable Neo4j password + native vars). Needed by the steps below.
+  const { path: envPath, vars } = ensureEnvFile();
 
-  // 5. API image — loaded from the USB, no download.
-  const tag = imageTag(manifest);
-  step('image', 'active', 'Preparing the application image…');
-  if (!(await docker.imageExists(tag))) {
-    const tar = assets.assetPath(assetsDir, manifest, 'image');
-    step('image', 'active', 'Verifying the application image…');
-    await assets.verify(tar, manifest.image.sha256);
-    step('image', 'active', 'Loading the application image into Docker…');
-    await docker.loadImage(tar, (l) => step('image', 'active', l));
+  // 4. Neo4j engine — unpack the bundled server + JRE, set the initial password
+  //    BEFORE the first start (the password is baked into the data dir on init).
+  step('neo4j', 'active', 'Preparing the database engine…');
+  if (!fs.existsSync(paths.neo4jConsolePath())) {
+    const nz = assets.assetPath(assetsDir, manifest, 'neo4j');
+    await assets.verify(nz, manifest.neo4j.sha256);
+    step('neo4j', 'active', 'Unpacking Neo4j…');
+    await extractZip(nz, paths.neo4jHomeDir(), (l) => step('neo4j', 'active', l));
   }
-  step('image', 'done', 'Application image ready.');
+  if (!fs.existsSync(path.join(paths.jreHomeDir(), 'bin'))) {
+    const jz = assets.assetPath(assetsDir, manifest, 'jre');
+    await assets.verify(jz, manifest.jre.sha256);
+    step('neo4j', 'active', 'Unpacking the Java runtime…');
+    await extractZip(jz, paths.jreHomeDir(), (l) => step('neo4j', 'active', l));
+  }
+  const pwMarker = path.join(paths.userDataDir(), 'neo4j-password-set.json');
+  if (!fs.existsSync(pwMarker)) {
+    step('neo4j', 'active', 'Setting database credentials…');
+    const password = vars.NEO4J_AUTH.split('/')[1];
+    const env = { ...process.env, JAVA_HOME: paths.jreHomeDir() };
+    const { code } = await runStream(paths.neo4jAdminPath(),
+      ['dbms', 'set-initial-password', password], { env }, (l) => step('neo4j', 'active', l));
+    if (code !== 0) throw new Error('Failed to set the Neo4j initial password.');
+    fs.writeFileSync(pwMarker, JSON.stringify({ setAt: new Date().toISOString() }), 'utf8');
+  }
+  step('neo4j', 'done', 'Database engine ready.');
 
-  // 6. Source corpus — extracted from the USB (mounted read-only so citation
-  // links resolve). The archive holds a top-level `project_data/` dir, so it
-  // extracts to userData → <userData>/project_data, which PROJECT_DATA_DIR
-  // points at and what gets mounted to /app/project_data.
+  // 5. Runtime — unpack the frozen API bundle.
+  step('runtime', 'active', 'Preparing the application…');
+  if (!fs.existsSync(paths.apiExePath())) {
+    const az = assets.assetPath(assetsDir, manifest, 'apiBundle');
+    await assets.verify(az, manifest.apiBundle.sha256);
+    step('runtime', 'active', 'Unpacking the application…');
+    await extractZip(az, paths.apiDir(), (l) => step('runtime', 'active', l));
+  }
+  step('runtime', 'done', 'Application ready.');
+
+  // 6. Source corpus — extract the project_data archive under userData (its
+  //    top-level project_data/ dir lands at paths.projectDataDir()).
   const dataMarker = path.join(paths.userDataDir(), 'data-ready.json');
   step('data', 'active', 'Preparing source documents…');
   if (!fs.existsSync(dataMarker)) {
     const archive = assets.assetPath(assetsDir, manifest, 'projectData');
     await assets.verify(archive, manifest.projectData.sha256);
     step('data', 'active', 'Extracting source documents…');
-    await extractTarGz(archive, paths.userDataDir());
+    await extractTarGz(archive, paths.userDataDir(), (l) => step('data', 'active', l));
     fs.writeFileSync(dataMarker, JSON.stringify({ readyAt: new Date().toISOString() }), 'utf8');
   }
   step('data', 'done', 'Source documents ready.');
 
-  // 7. Graph snapshot — copied from the USB into the mount dir, then imported.
+  // 7. Graph snapshot — copy the dump into place and load it OFFLINE (Neo4j is
+  //    not started yet), so the slow ingest/enrich pipeline is skipped.
   step('snapshot', 'active', 'Preparing the knowledge graph…');
   if (!snapshot.alreadyImported()) {
     const srcDump = assets.assetPath(assetsDir, manifest, 'snapshot');
@@ -171,16 +174,15 @@ async function runFirstRun(emit, assetsDir) {
   }
   step('snapshot', 'done', 'Knowledge graph ready.');
 
-  // 8. Start the stack.
+  // 8. Start the native stack (Neo4j → API) and wait for health.
   step('start', 'active', 'Starting the assistant…');
-  await compose.up(envPath, (l) => step('start', 'active', l));
-  const healthy = await supervisor.waitForHealth(120, 2000);
+  const healthy = await supervisor.start(envPath, (l) => step('start', 'active', l));
   if (!healthy) throw new Error('The API did not become healthy in time.');
   step('start', 'done', 'Ready.');
 
   // Mark first run complete.
   fs.writeFileSync(paths.firstRunMarkerPath(),
-    JSON.stringify({ completedAt: new Date().toISOString(), version: manifest.image.version }), 'utf8');
+    JSON.stringify({ completedAt: new Date().toISOString() }), 'utf8');
 
   return { envPath };
 }

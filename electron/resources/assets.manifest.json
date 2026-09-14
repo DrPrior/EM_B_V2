@@ -1,24 +1,28 @@
 {
-  "_comment": "USB delivery, no download server. The three custom assets (image/snapshot/projectData) are read from an `assets/` folder on the USB by filename; build-release.ps1 fills in their sha256. Docker + Ollama installers and the base models still come from the internet (targets are online). image.version MUST match the API image tag (emb-hybrid-api:<version>) and the APP_VERSION the desktop compose interpolates.",
-  "image": {
-    "version": "0.1.1",
-    "file": "emb-hybrid-api-0.1.1.tar.gz",
-    "sha256": "8e2ff1c7b3e6e81801678f51ab3d23dc8cbf02b89dfec111b45183c6cef268c4"
+  "_comment": "USB delivery, no download server. Native custom assets (apiBundle/neo4j/jre/snapshot/projectData) are read from an `assets/` folder on the USB by filename; electron/scripts/build-release.ps1 fills in the sha256 (blank = verification skipped, for dev). The Ollama installer + base models still come from the internet. apiBundle is the folder-signature file. Build-pipeline contract: apiBundle unzips to <userData>/api/emb-api.exe + _internal/, neo4j to <userData>/neo4j/bin/..., jre to <userData>/jre/bin/. See docs/DECONTAINERIZE_PLAN.md (Workstream E).",
+  "version": "0.4.0",
+  "apiBundle": {
+    "file": "emb-api.zip",
+    "sha256": ""
+  },
+  "neo4j": {
+    "file": "neo4j-community.zip",
+    "sha256": ""
+  },
+  "jre": {
+    "file": "jre.zip",
+    "sha256": ""
   },
   "snapshot": {
     "file": "neo4j.dump",
-    "sha256": "020cefc970cd9e5a28f887a3987e1427a033ff6f787479f3559687ca967db305"
+    "sha256": ""
   },
   "projectData": {
     "file": "project_data.tar.gz",
-    "sha256": "041947401ecddb6eebdf6ddfaeb20c0e2683730a1d1a3e23fb6fa0781e967419"
+    "sha256": ""
   },
   "ollama": {
     "win32": "https://ollama.com/download/OllamaSetup.exe",
     "darwin": "https://ollama.com/download/Ollama.dmg"
-  },
-  "docker": {
-    "win32": "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe",
-    "darwin": "https://desktop.docker.com/mac/main/arm64/Docker.dmg"
   }
 }

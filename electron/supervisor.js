@@ -1,23 +1,22 @@
 'use strict';
 
 /**
- * Lifecycle supervisor for the Dockerized backend (Neo4j + API).
+ * Lifecycle supervisor for the native backend (Neo4j + API).
  *
- * Brings the stack up, polls the API's /health endpoint, and tears it down on
- * quit. Ollama is host-native and outside this supervisor — the wizard ensures
- * it's running before the stack starts.
+ * Decontainerized: instead of `docker compose`, it spawns Neo4j and the frozen
+ * API as child processes (lib/procs.js), waits for Neo4j's bolt port and then the
+ * API's /health, and tears both down on quit. Ollama is host-native and ensured
+ * running by the wizard before the stack starts.
  */
 
 const fs = require('fs');
-const http = require('http');
-const compose = require('./lib/compose');
-const docker = require('./lib/docker');
+
+const procs = require('./lib/procs');
 const ollama = require('./lib/ollama');
 const ollamaenv = require('./lib/ollamaenv');
 const snapshot = require('./lib/snapshot');
 const paths = require('./lib/paths');
-
-const HEALTH_URL = { host: '127.0.0.1', port: 8000, path: '/health' };
+const { parseEnv } = require('./lib/envfile');
 
 /** True once the guided first-run provisioning has fully completed. */
 function isFirstRunComplete() {
@@ -25,29 +24,26 @@ function isFirstRunComplete() {
 }
 
 function checkHealth(timeoutMs = 2000) {
-  return new Promise((resolve) => {
-    const req = http.get({ ...HEALTH_URL, timeout: timeoutMs }, (res) => {
-      let body = '';
-      res.on('data', (d) => (body += d));
-      res.on('end', () => {
-        try { resolve(res.statusCode === 200 && JSON.parse(body).status === 'healthy'); }
-        catch { resolve(false); }
-      });
-    });
-    req.on('timeout', () => req.destroy());
-    req.on('error', () => resolve(false));
-  });
+  return procs.checkHealth(timeoutMs);
 }
 
-async function waitForHealth(retries = 60, delayMs = 2000) {
-  for (let i = 0; i < retries; i++) {
-    if (await checkHealth()) return true;
-    await new Promise((r) => setTimeout(r, delayMs));
+function waitForHealth(retries = 90, delayMs = 2000) {
+  return procs.waitForHealth(retries, delayMs);
+}
+
+/** Read the per-install env file into a plain object for the child processes. */
+function loadEnv(envPath) {
+  try {
+    return parseEnv(fs.readFileSync(envPath, 'utf8'));
+  } catch {
+    return {};
   }
-  return false;
 }
 
 /**
+ * Start the stack: launch Neo4j, wait for bolt, launch the API, wait for health.
+ * @param {(line:string)=>void} onLine
+ */
  * Build the error thrown when the API never reports healthy.
  *
  * `/health` is gated behind the FastAPI lifespan, which fails fast on any
@@ -67,54 +63,49 @@ async function healthTimeoutError(envPath) {
   return new Error(`The API did not become healthy in time.${detail}`);
 }
 
-/** Start the stack (idempotent — compose up -d) and wait until healthy. */
-async function start(envPath, onLine = () => {}) {
-  await compose.up(envPath, onLine);
-  return waitForHealth();
-}
-
 /** Stop the stack. Best-effort; never throws on quit. */
-async function stop(envPath, onLine = () => {}) {
-  try { await compose.down(envPath, onLine); } catch { /* ignore on shutdown */ }
+async function stop() {
+  try {
+    await procs.stopAll();
+  } catch {
+    /* ignore on shutdown */
+  }
 }
 
 /**
- * Subsequent-launch fast path: wait for the already-installed Docker + Ollama to
- * be running (they usually auto-start at login), then bring the stack up. Emits
+ * Subsequent-launch fast path: ensure host Ollama is running (usually auto-starts
+ * at login), restore the graph if needed, then bring the native stack up. Emits
  * the same step events the wizard renders; throws with a needs-user event if a
- * dependency isn't running.
+ * dependency isn't ready.
  * @param {(e:{step:string,status:string,message?:string})=>void} emit
  */
 async function quickStart(envPath, emit = () => {}) {
-  emit({ step: 'docker', status: 'active', message: 'Waiting for Docker…' });
-  if (!(await docker.isDaemonRunning()) && !(await docker.waitForDaemon(30, 2000))) {
-    emit({ step: 'docker', status: 'needs-user', message: 'Please start Docker Desktop, then retry.' });
-    throw new Error('Docker daemon not running');
-  }
-  emit({ step: 'docker', status: 'done', message: 'Docker is running.' });
-
   emit({ step: 'ollama', status: 'active', message: 'Waiting for Ollama…' });
   if (!(await ollama.isRunning()) && !(await ollama.waitForRunning(30, 2000))) {
     emit({ step: 'ollama', status: 'needs-user', message: 'Please start Ollama, then retry.' });
     throw new Error('Ollama not running');
   }
-  // Self-heal the host env vars if something cleared them (e.g. an Ollama update
-  // re-prompted the firewall / reset settings). No-op on the warm path.
-  const envRes = await ollamaenv.ensure((msg) => emit({ step: 'ollama', status: 'active', message: msg }));
+  // Self-heal the host env vars if something cleared them. No-op on the warm path.
+  const envRes = await ollamaenv.ensure((msg) =>
+    emit({ step: 'ollama', status: 'active', message: msg }),
+  );
   if (envRes.changed && !envRes.restarted) {
-    emit({ step: 'ollama', status: 'needs-user', message: 'Quit and reopen Ollama to apply required settings, then retry.' });
+    emit({
+      step: 'ollama',
+      status: 'needs-user',
+      message: 'Quit and reopen Ollama to apply required settings, then retry.',
+    });
     throw new Error('Ollama must be restarted to apply required settings');
   }
   emit({ step: 'ollama', status: 'done', message: 'Ollama is running.' });
 
   emit({ step: 'start', status: 'active', message: 'Starting the assistant…' });
-  // Ensure the knowledge graph lives in the volume the stack currently uses.
-  // No-op once the marker matches the active volume; on a volume change (e.g.
-  // the fix that moved the desktop stack off the shared dev volume) this
-  // re-imports the locally cached dump so the app doesn't start with an empty
-  // graph. Best-effort: if the cached dump is gone we still start the stack.
+  // Neo4j is not started yet, so the offline snapshot load is safe. Idempotent —
+  // a no-op once the marker matches the current data dir.
   try {
-    await snapshot.importSnapshot(envPath, (l) => emit({ step: 'start', status: 'active', message: l }));
+    await snapshot.importSnapshot(envPath, (l) =>
+      emit({ step: 'start', status: 'active', message: l }),
+    );
   } catch (err) {
     emit({ step: 'start', status: 'active', message: `Skipping graph restore: ${err.message}` });
   }

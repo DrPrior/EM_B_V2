@@ -85,7 +85,7 @@ def test_vector_search_returns_results(client: TestClient, mock_session) -> None
     ]
 
     with patch.object(
-        graph_router, "generate_embedding", return_value=[0.1] * 2560
+        graph_router, "generate_embedding", return_value=[0.1] * 768
     ):
         resp = client.post("/graph/search", json={"query": "hello", "top_k": 3})
 

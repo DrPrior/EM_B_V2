@@ -381,13 +381,13 @@
 </figure>
 
 <div class="note warn">
-  <strong>These app-code wins aren't live on the running stack yet</strong>
+  <strong>These app-code wins aren't live on the running app yet</strong>
   <p>
-    The <code>em_b_v2-api-1</code> container bind-mounts the <strong>main</strong> checkout
-    (<code>…/EM_B_V2/src</code>), not this worktree — so the 2.4× above was measured with a throwaway
-    container mounted on this branch. The Family&nbsp;B changes go live on the real stack only once this
-    branch is <strong>merged to main</strong> (uvicorn's <code>--reload</code> then picks them up). The
-    host env vars, by contrast, are already applied — they live in the Ollama daemon, not the repo.
+    The 2.4× above was measured with a native API (<code>uvicorn --reload</code>) run against this
+    branch. The Family&nbsp;B changes go live for everyone only once this branch is <strong>merged to
+    main</strong> — a dev API's <code>--reload</code> picks them up on save, and a shipped build picks
+    them up on its next release. The host env vars, by contrast, are already applied — they live in the
+    Ollama daemon, not the repo.
   </p>
 </div>
 

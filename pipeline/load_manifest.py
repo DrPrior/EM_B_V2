@@ -21,6 +21,7 @@ from pathlib import Path
 
 from neo4j import ManagedTransaction, Session  # type: ignore[import-untyped]
 
+from src.core.config import settings
 from src.database import schema
 from src.database.connection import Neo4jConnection
 
@@ -250,7 +251,11 @@ def _resolve_filepaths(
     if matches:
         return [record["filepath"] for record in matches], False
 
-    synthetic = f"{data_root}/{category}/{filename}" if category else f"{data_root}/{filename}"
+    synthetic = (
+        f"{data_root}/{category}/{filename}"
+        if category
+        else f"{data_root}/{filename}"
+    )
     return [synthetic], True
 
 
@@ -327,7 +332,9 @@ def link_curated_relations(session: Session, stats: dict[str, int]) -> None:
             print(f"  VARIANT_OF  {variant}  →  {canonical}")
 
 
-def load_manifests(session: Session, data_root: str = DEFAULT_DATA_ROOT) -> dict[str, int]:
+def load_manifests(
+    session: Session, data_root: str = DEFAULT_DATA_ROOT
+) -> dict[str, int]:
     """Load every MANIFEST*.md file under data_root into the graph.
 
     Returns a statistics dictionary.
@@ -361,6 +368,8 @@ if __name__ == "__main__":
     nc = Neo4jConnection.get_instance()
     try:
         with nc.session() as session:
-            load_manifests(session)
+            # Honor DATA_ROOT (settings.data_root) so native runs read the host
+            # corpus; unchanged under Docker where the default is /app/project_data.
+            load_manifests(session, data_root=settings.data_root)
     finally:
         nc.close()

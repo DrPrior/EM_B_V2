@@ -67,7 +67,7 @@
   <rect x="358" y="338" width="184" height="70" rx="8" class="d-green"/>
   <text x="450" y="362" class="d-t b d-c">Chunk</text>
   <text x="450" y="380" class="d-m mono d-c">.chunk_id .text .sequence</text>
-  <text x="450" y="398" class="d-m mono d-c">.embedding[2560] .enriched</text>
+  <text x="450" y="398" class="d-m mono d-c">.embedding[768] .enriched</text>
 
   <!-- ── manifest panel ── -->
   <rect x="14" y="118" width="266" height="330" rx="10" class="d-panel"/>
@@ -229,7 +229,7 @@
     <tr><td>Unique constraint</td><td><code>Organization.name</code>, <code>Concept.name</code>, <code>LegalReference.name</code>, <code>Course.name</code>, <code>MaterialType.name</code></td><td>Entity nodes are shared across chunks; MERGE must converge</td></tr>
     <tr><td>Unique constraint</td><td><code>WhyItMatters.name</code>, <code>Source.url</code>, <code>Edition.value</code>, <code>Validated.name</code>, <code>Category.name</code>, <code>Tranche.name</code>, <code>Access.level</code></td><td>Same, for the catalogue layer</td></tr>
     <tr><td>Index</td><td><code>Chunk.sequence_number</code></td><td>Fast ordering of chunks within a file</td></tr>
-    <tr><td>Vector index</td><td><code>Chunk.embedding</code> — <code>chunk_vector_idx</code></td><td>2560 dimensions, cosine similarity; must match <code>qwen3-embedding:4b</code></td></tr>
+    <tr><td>Vector index</td><td><code>Chunk.embedding</code> — <code>chunk_vector_idx</code></td><td>768 dimensions, cosine similarity; must match <code>embeddinggemma</code></td></tr>
   </tbody>
 </table>
 </div>

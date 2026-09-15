@@ -1,14 +1,34 @@
 # Hybrid Setup — Host-Native Ollama
 
-This app runs in a **hybrid** architecture: **Neo4j** and the **Python API** run
-in Docker, while **Ollama runs natively on the host machine** so it can use the
-host GPU directly (Apple **Metal**, NVIDIA **CUDA**, or Intel Arc **Vulkan**)
-without the performance loss of GPU passthrough into a Linux container.
+> ## ⚠️ Decontainerization in progress
+>
+> **Docker is being removed.** The "hybrid" split described below (Neo4j + API in
+> Docker, Ollama native) is becoming **all-native** — see
+> [`DECONTAINERIZE_PLAN.md`](DECONTAINERIZE_PLAN.md). Once migrated:
+> - The API runs native and reaches Ollama over `http://localhost:11434` —
+>   **`OLLAMA_HOST=0.0.0.0` is no longer needed** and the entire "Hardening for
+>   untrusted networks" section below becomes moot (Ollama binds `127.0.0.1` only).
+> - Neo4j runs native (bundled JRE); `docker compose up` is replaced by native
+>   process startup. The `neo4j:2026.04.0` store-format pin still applies to the
+>   dump.
+>
+> **No refactor code has landed yet** — the Docker instructions below still work
+> today. The Ollama **install** steps (section 1) stay valid either way; the
+> env-var section's `OLLAMA_HOST=0.0.0.0` is a Docker-only requirement that goes
+> away natively.
+
+This app currently runs in a **hybrid** architecture: **Neo4j** and the **Python
+API** run in Docker, while **Ollama runs natively on the host machine** so it can
+use the host GPU directly (Apple **Metal**, NVIDIA **CUDA**, or Intel Arc
+**Vulkan**) without the performance loss of GPU passthrough into a Linux
+container. (The decontainerization moves Neo4j and the API native too — see the
+banner above.)
 
 The API container reaches the host's Ollama at `http://host.docker.internal:11434`
 and **provisions its models automatically on startup** — you do **not** need to
 pull models or build the custom variants by hand. You only need to install
-Ollama and configure it to accept traffic from the container.
+Ollama and configure it to accept traffic from the container. (Native: the API
+reaches Ollama at `http://localhost:11434`.)
 
 > 📦 **Two ways to run this stack.** For **end users**, the whole thing is now
 > packaged as a one-click **desktop app** (Electron shell in [`electron/`](../electron/))
@@ -147,7 +167,7 @@ On startup the API will:
 1. Wait for the host Ollama daemon (retries `ollama_startup_retries` times; if
    it never answers, the container **exits** with a clear message — start Ollama
    and bring the stack back up).
-2. Pull the base models (`gemma4:12b-it-qat`, `qwen3-embedding:4b`) if missing —
+2. Pull the base models (`gemma4:12b-it-qat`, `embeddinggemma:latest`) if missing —
    the first run downloads ~10 GB, so be patient.
 3. Build the custom `chat-model` / `embedding-model` variants from
    [`Modelfile`](../Modelfile) and [`Modelfile.embeddings`](../Modelfile.embeddings)

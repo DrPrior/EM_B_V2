@@ -135,7 +135,7 @@
     </tr>
     <tr>
       <td><span class="tag post">POST</span> <code>/admin/ingest</code></td>
-      <td>Run the ingestion pipeline. Body <code>{"data_root": …}</code>, defaults to <code>/app/project_data</code>.</td>
+      <td>Run the ingestion pipeline. Body <code>{"data_root": …}</code>, defaulting to the configured <code>data_root</code> (<code>DATA_ROOT</code>).</td>
       <td><a class="ref" href="../../src/routers/admin.py">admin.py:66</a></td>
     </tr>
     <tr>
@@ -145,7 +145,7 @@
     </tr>
     <tr>
       <td><span class="tag post">POST</span> <code>/admin/bootstrap-models</code></td>
-      <td>Re-provision host Ollama models without restarting the container. 503 if the daemon is unreachable.</td>
+      <td>Re-provision host Ollama models without restarting the API process. 503 if the daemon is unreachable.</td>
       <td><a class="ref" href="../../src/routers/admin.py">admin.py:112</a></td>
     </tr>
     <tr>
@@ -175,7 +175,7 @@
     </tr>
     <tr>
       <td><span class="tag get">GET</span> <code>/health</code></td>
-      <td>Liveness. The Electron supervisor polls this to decide when the stack is ready.</td>
+      <td>Liveness. The Electron shell polls this to decide when the native API is ready.</td>
       <td><a class="ref" href="../../src/main.py">main.py:97</a></td>
     </tr>
     <tr>
@@ -191,7 +191,7 @@
   <strong>One text-search subtlety</strong>
   <p>
     <code>GET /graph/search</code> uses <code>toStringOrNull</code> rather than <code>toString</code>
-    (<a class="ref" href="../../src/routers/graph.py">graph.py:237</a>). Chunk nodes carry a 2560-element
+    (<a class="ref" href="../../src/routers/graph.py">graph.py:237</a>). Chunk nodes carry a 768-element
     <code>embedding</code> array; <code>toString</code> on an array raises, whereas
     <code>toStringOrNull</code> yields null and the <code>CONTAINS</code> simply evaluates falsey. Without
     it, every search over a populated graph would error.
@@ -242,7 +242,7 @@
   <path d="M 378 104 L 340 104 L 340 130" class="d-arrow" marker-end="url(#ss-ah)"/>
   <text x="378" y="126" class="d-m xs">oldest turn is evicted automatically once the deque is full — no explicit trimming code</text>
   <text x="378" y="150" class="d-m xs">created_at and last_active are recorded but nothing expires sessions today</text>
-  <text x="378" y="176" class="d-t sm b" style="fill:var(--rose)">In-memory only: every session is lost when the container restarts or hot-reloads.</text>
+  <text x="378" y="176" class="d-t sm b" style="fill:var(--rose)">In-memory only: every session is lost when the API process restarts or hot-reloads.</text>
 
   <rect x="20" y="220" width="840" height="62" rx="9" class="d-box"/>
   <text x="38" y="244" class="d-t sm b">Why a lock and not asyncio primitives</text>
@@ -402,13 +402,13 @@
 
 <p>
   <code>tests/unit/</code> holds one module per source module, plus
-  <code>tests/integration/test_live_stack.py</code> which exercises a running stack. Run them inside the
-  container so imports and paths match production:
+  <code>tests/integration/test_live_stack.py</code> which exercises a running stack. Run them natively
+  in your venv:
 </p>
 
-<pre><code>docker exec em_b_v2-api-1 pytest
-docker exec em_b_v2-api-1 pytest tests/test_rag.py -v
-docker exec em_b_v2-api-1 pytest -m unit</code></pre>
+<pre><code>pytest
+pytest tests/test_rag.py -v
+pytest -m unit</code></pre>
 
 <div class="pagenav">
   <a href="rag.html">← The RAG query path</a>

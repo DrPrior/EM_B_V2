@@ -5,17 +5,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
+    # extra="ignore": the shared .env carries keys this model doesn't declare —
+    # NEO4J_AUTH and DB_URI (read directly from os.environ by
+    # src/database/connection.py) plus legacy Docker-compose interpolation keys
+    # (APP_VERSION, PROJECT_DATA_DIR, COMPOSE_PROJECT_NAME). Under Docker no .env
+    # existed inside the container so this never bit; running natively, pydantic
+    # reads the on-disk .env and would reject those as extra unless we ignore them.
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
+        extra="ignore",
     )
 
     ollama_base_url: str = Field(
         default="http://localhost:11434",
         description=(
-            "Base URL for Ollama API. In the hybrid deployment Ollama runs "
-            "natively on the host, so the container overrides this with "
-            "http://host.docker.internal:11434 via OLLAMA_BASE_URL."
+            "Base URL for the host-native Ollama API. The app runs natively and "
+            "reaches Ollama over loopback; override via OLLAMA_BASE_URL only for a "
+            "non-default host or port."
         ),
     )
     chat_model: str = Field(
@@ -29,7 +36,7 @@ class Settings(BaseSettings):
         default="embedding-model",
         description=(
             "Embedding model name for Ollama — the custom variant built from "
-            "Modelfile.embeddings by the startup bootstrap (FROM qwen3-embedding:4b)"
+            "Modelfile.embeddings by the startup bootstrap (FROM embeddinggemma:latest)"
         ),
     )
     chat_base_model: str = Field(
@@ -41,7 +48,7 @@ class Settings(BaseSettings):
         ),
     )
     embedding_base_model: str = Field(
-        default="qwen3-embedding:4b",
+        default="embeddinggemma:latest",
         description=(
             "Base model the embedding-model variant is built FROM. The startup "
             "bootstrap pulls this onto the host before creating embedding-model. "
@@ -161,6 +168,17 @@ class Settings(BaseSettings):
             "Token cap (num_predict) for the per-query entity-extraction LLM "
             "call. The output is a small JSON object, so a low cap bounds its "
             "latency without truncating typical results."
+        ),
+    )
+    enrichment_concurrency: int = Field(
+        default=4,
+        description=(
+            "How many chunk entity-extraction LLM calls the enrichment pipeline "
+            "(pipeline/enrich.py, Pass 2) issues to Ollama concurrently. Real "
+            "speedup requires the host Ollama to allow at least this many parallel "
+            "slots (OLLAMA_NUM_PARALLEL) and enough VRAM for their KV caches; "
+            "measured ~2.3x throughput at 4 on an RTX 4000 Ada. Neo4j writes stay "
+            "serial on the main thread. 1 = fully sequential (the old behavior)."
         ),
     )
     timing_log_enabled: bool = Field(

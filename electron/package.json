@@ -1,8 +1,8 @@
 {
   "name": "emb-hybrid-desktop",
   "productName": "EM Knowledge Assistant",
-  "version": "0.3.2",
-  "description": "Self-contained desktop app for the EM_B_Hybrid knowledge-graph assistant. Provisions Docker, Ollama, models, and a prebuilt graph on first run, then runs the local stack.",
+  "version": "0.3.1",
+  "description": "Self-contained desktop app for the EM_B_Hybrid knowledge-graph assistant. Provisions Ollama, native Neo4j, models, and a prebuilt graph on first run, then supervises the local native processes.",
   "author": {
     "name": "University of Arkansas at Little Rock"
   },
@@ -31,10 +31,6 @@
       "wizard/**/*"
     ],
     "extraResources": [
-      {
-        "from": "../docker-compose.desktop.yml",
-        "to": "docker-compose.desktop.yml"
-      },
       {
         "from": "../Modelfile",
         "to": "Modelfile"

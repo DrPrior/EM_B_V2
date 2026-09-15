@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from src.core.config import settings
 from src.main import app
 from src.routers import admin as admin_router
 
@@ -46,9 +47,9 @@ def test_ingest_uses_default_body(client: TestClient) -> None:
         resp = client.post("/admin/ingest")
 
     assert resp.status_code == 200
-    # Default data_root is applied when no body is sent.
+    # No body -> the configured data_root (settings.data_root) is applied.
     _, kwargs = mock_ingest.call_args
-    assert kwargs["data_root"] == "/app/project_data"
+    assert kwargs["data_root"] == settings.data_root
 
 
 def test_ingest_failure_returns_500(client: TestClient) -> None:

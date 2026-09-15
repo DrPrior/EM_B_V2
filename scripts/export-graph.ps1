@@ -1,81 +1,61 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Export the Neo4j graph (all nodes, embeddings, and the vector index config)
-    to a single portable snapshot/neo4j.dump so it can be shared with a coworker.
+    Export the Neo4j graph (all nodes, embeddings, and the vector-index config)
+    to a portable snapshot/neo4j.dump so it can be shared or shipped.
 
 .DESCRIPTION
-    The graph lives in the named Docker volume em_b_v2_neo4j_data, which is NOT
-    part of the repo. To let a coworker run the app without re-running the whole
-    ingest -> load_manifest -> enrich pipeline, ship them a dump of the database
-    alongside the code.
+    Native (decontainerized) port of the former docker-compose version: drives
+    the host's `neo4j-admin database dump` directly. Neo4j must be OFFLINE for the
+    dump, and this script does NOT manage the server lifecycle (Neo4j Desktop or a
+    bundled server owns it) — stop the database yourself first. The script refuses
+    to run while bolt (127.0.0.1:7687) is still open.
 
-    This uses Neo4j's official offline dump format (neo4j-admin database dump),
-    which is version-tolerant within a Neo4j major line. Community edition
-    requires the database offline, so this script stops the neo4j service, runs
-    the dump in a throwaway container that shares the same data volume, then
-    restarts neo4j.
+    Version note: a dump loads into the SAME Neo4j major line it was taken from,
+    and into Neo4j Community only if it is a record format (aligned/standard), not
+    Enterprise `block`. See docs/DECONTAINERIZE_PLAN.md.
 
-    The coworker restores it with import-graph.ps1 before their first
-    `docker compose up`.
+.PARAMETER Neo4jAdmin
+    Path to neo4j-admin (.bat on Windows). For a Neo4j Desktop DBMS this is
+    <...>/Data/dbmss/dbms-<id>/bin/neo4j-admin.bat. Required.
 
-    NOTE: both machines must run the SAME pinned Neo4j image (see the `image:`
-    line in docker-compose.yml). A dump is portable across patch versions but
-    not across major store-format changes.
+.PARAMETER JavaHome
+    JAVA_HOME for neo4j-admin. Neo4j Desktop bundles a JRE under
+    <...>/Cache/runtime/<zulu...> — pass it here if `java` isn't already on PATH.
 
 .PARAMETER Database
-    The database name to dump. Defaults to "neo4j" (the app's only database).
-
-.PARAMETER KeepStopped
-    Leave the neo4j service stopped after the dump instead of restarting it.
+    Database to dump. Defaults to "neo4j" (the app's only database).
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\scripts\export-graph.ps1
+    pwsh -File scripts/export-graph.ps1 `
+      -Neo4jAdmin "$env:USERPROFILE\.Neo4jDesktop2\Data\dbmss\dbms-XXId\bin\neo4j-admin.bat" `
+      -JavaHome  "$env:USERPROFILE\.Neo4jDesktop2\Cache\runtime\zulu21..."
 #>
 [CmdletBinding()]
 param(
-    [string]$Database = "neo4j",
-    [switch]$KeepStopped
+    [Parameter(Mandatory = $true)][string]$Neo4jAdmin,
+    [string]$JavaHome,
+    [string]$Database = "neo4j"
 )
 
 $ErrorActionPreference = "Stop"
-
-# Run from the repo root regardless of where the script is invoked from.
 $repoRoot = Split-Path -Parent $PSScriptRoot
-Set-Location $repoRoot
-
 $snapshotDir = Join-Path $repoRoot "snapshot"
-if (-not (Test-Path $snapshotDir)) {
-    New-Item -ItemType Directory -Path $snapshotDir | Out-Null
-}
+New-Item -ItemType Directory -Force -Path $snapshotDir | Out-Null
 
-Write-Host "==> Stopping neo4j (dump requires the database offline)..." -ForegroundColor Cyan
-docker compose stop neo4j
-if ($LASTEXITCODE -ne 0) { throw "docker compose stop neo4j failed." }
+# Guard: the dump requires the database offline.
+$boltUp = (Test-NetConnection 127.0.0.1 -Port 7687 -WarningAction SilentlyContinue).TcpTestSucceeded
+if ($boltUp) { throw "Neo4j is running (bolt 127.0.0.1:7687 is open). Stop the database first — an offline dump is required." }
+if (-not (Test-Path $Neo4jAdmin)) { throw "neo4j-admin not found at $Neo4jAdmin." }
+if ($JavaHome) { $env:JAVA_HOME = $JavaHome }
 
-try {
-    Write-Host "==> Dumping database '$Database' to snapshot/$Database.dump ..." -ForegroundColor Cyan
-    # Throwaway container shares the neo4j_data volume; --no-deps so it doesn't
-    # drag the api service up. Mount the host snapshot dir as the dump target.
-    docker compose run --rm --no-deps -v "${snapshotDir}:/snapshot" neo4j `
-        neo4j-admin database dump $Database --to-path=/snapshot --overwrite-destination=true
-    if ($LASTEXITCODE -ne 0) { throw "neo4j-admin database dump failed." }
-}
-finally {
-    if (-not $KeepStopped) {
-        Write-Host "==> Restarting neo4j..." -ForegroundColor Cyan
-        docker compose start neo4j
-    }
-}
+Write-Host "==> Dumping database '$Database' to snapshot/$Database.dump ..." -ForegroundColor Cyan
+& $Neo4jAdmin database dump $Database --to-path=$snapshotDir --overwrite-destination=true
+if ($LASTEXITCODE -ne 0) { throw "neo4j-admin database dump failed." }
 
 $dump = Join-Path $snapshotDir "$Database.dump"
-if (Test-Path $dump) {
-    $sizeMB = [math]::Round((Get-Item $dump).Length / 1MB, 1)
-    Write-Host ""
-    Write-Host "Done. Wrote $dump ($sizeMB MB)." -ForegroundColor Green
-    Write-Host "Share it with your coworker (it is gitignored; use Git LFS or send it out-of-band)." -ForegroundColor Green
-    Write-Host "They restore it with: .\scripts\import-graph.ps1" -ForegroundColor Green
-}
-else {
-    throw "Expected dump not found at $dump."
-}
+if (-not (Test-Path $dump)) { throw "Expected dump not found at $dump." }
+$sizeMB = [math]::Round((Get-Item $dump).Length / 1MB, 1)
+Write-Host ""
+Write-Host "Done. Wrote $dump ($sizeMB MB)." -ForegroundColor Green
+Write-Host "It is gitignored — share via Git LFS or out-of-band. Restore with scripts/import-graph.ps1. Start Neo4j again when finished." -ForegroundColor Green

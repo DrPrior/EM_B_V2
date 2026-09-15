@@ -34,7 +34,6 @@ EM_B_Hybrid.code-workspace
 htmlcov/
 pytest_output.log
 pytest.ini
-requirements-dev.txt
 test_results.txt
 
 

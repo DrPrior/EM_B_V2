@@ -38,9 +38,6 @@ requirements-dev.txt
 test_results.txt
 
 
-# Docker
-.dockerignore
-
 # Neo4j graph snapshots (share out-of-band or via Git LFS — a .dump with
 # embeddings is large). scripts/export-graph.ps1 writes here.
 snapshot/
@@ -70,3 +67,6 @@ usb-staging.zip
 
 #test outputs and logs
 test_output.txt
+
+#Neo4j data dubmp
+neo4j.dump

@@ -44,14 +44,23 @@ function loadEnv(envPath) {
  * Start the stack: launch Neo4j, wait for bolt, launch the API, wait for health.
  * @param {(line:string)=>void} onLine
  */
-async function start(envPath, onLine = () => {}) {
-  const vars = loadEnv(envPath);
-  procs.startNeo4j(vars, onLine);
-  if (!(await procs.waitForBolt())) {
-    throw new Error('Neo4j did not open its bolt port in time.');
-  }
-  procs.startApi(vars, onLine);
-  return waitForHealth();
+ * Build the error thrown when the API never reports healthy.
+ *
+ * `/health` is gated behind the FastAPI lifespan, which fails fast on any
+ * startup dependency — Neo4j unreachable or auth-mismatched, or host Ollama
+ * unreachable from the container (host.docker.internal:11434 blocked by the
+ * firewall, or OLLAMA_HOST=0.0.0.0 not applied to the running daemon). That real
+ * cause is in the API container log, not in `compose up -d` output, so append
+ * its tail here rather than leaving the user with an opaque timeout.
+ */
+async function healthTimeoutError(envPath) {
+  let detail = '';
+  try {
+    const out = await compose.logs(envPath, 'api', 40);
+    const tail = out.split('\n').map((l) => l.trim()).filter(Boolean).slice(-12).join('\n');
+    if (tail) detail = `\n\nThe API container reported:\n${tail}`;
+  } catch { /* diagnostics are best-effort */ }
+  return new Error(`The API did not become healthy in time.${detail}`);
 }
 
 /** Stop the stack. Best-effort; never throws on quit. */
@@ -101,8 +110,8 @@ async function quickStart(envPath, emit = () => {}) {
     emit({ step: 'start', status: 'active', message: `Skipping graph restore: ${err.message}` });
   }
   const healthy = await start(envPath, () => {});
-  if (!healthy) throw new Error('The API did not become healthy in time.');
+  if (!healthy) throw await healthTimeoutError(envPath);
   emit({ step: 'start', status: 'done', message: 'Ready.' });
 }
 
-module.exports = { isFirstRunComplete, checkHealth, waitForHealth, start, stop, quickStart };
+module.exports = { isFirstRunComplete, checkHealth, waitForHealth, healthTimeoutError, start, stop, quickStart };

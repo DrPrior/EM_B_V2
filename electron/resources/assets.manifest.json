@@ -1,9 +1,9 @@
 {
   "_comment": "USB delivery, no download server. The three custom assets (image/snapshot/projectData) are read from an `assets/` folder on the USB by filename; build-release.ps1 fills in their sha256. Docker + Ollama installers and the base models still come from the internet (targets are online). image.version MUST match the API image tag (emb-hybrid-api:<version>) and the APP_VERSION the desktop compose interpolates.",
   "image": {
-    "version": "0.1.1",
-    "file": "emb-hybrid-api-0.1.1.tar.gz",
-    "sha256": "8e2ff1c7b3e6e81801678f51ab3d23dc8cbf02b89dfec111b45183c6cef268c4"
+    "version": "0.1.2",
+    "file": "emb-hybrid-api-0.1.2.tar.gz",
+    "sha256": "6ef4c9225a5dbe1dc6c2cc1ec80d7c9840048ba08cc2c7de2342f623e8585575"
   },
   "snapshot": {
     "file": "neo4j.dump",

@@ -15,8 +15,10 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const supervisor = require('./supervisor');
 const paths = require('./lib/paths');
 const assets = require('./lib/assets');
+const docker = require('./lib/docker');
 const { runFirstRun, RebootRequiredError, loadManifest } = require('./lib/firstrun');
 const { ensureEnvFile } = require('./lib/envfile');
+const { ensureImageForVersion: ensureImage } = require('./lib/imageupdate');
 
 const APP_URL = 'http://127.0.0.1:8000';
 
@@ -92,6 +94,21 @@ async function resolveAssetsDir(manifest) {
   return dir;
 }
 
+/**
+ * Load the current manifest version's API image before the fast-path start if
+ * it isn't already present (in-place update). Wires the real docker/assets/USB
+ * resolver into lib/imageupdate.js; see that module for the full rationale.
+ */
+function ensureImageForVersion(manifest) {
+  return ensureImage(manifest, {
+    docker,
+    assets,
+    resolveAssetsDir,
+    emit: (e) => send('progress', e),
+    onError: (message) => send('error', { message }),
+  });
+}
+
 // Renderer asks what mode to show.
 ipcMain.handle('wizard:getState', () => ({
   firstRunComplete: supervisor.isFirstRunComplete(),
@@ -105,6 +122,10 @@ ipcMain.handle('wizard:begin', async () => {
     envPath = ensureEnvFile({ appVersion: version }).path;
 
     if (supervisor.isFirstRunComplete()) {
+      // An in-place update bumps the bundled image version but keeps the
+      // first-run marker, so make sure that version's image is actually loaded
+      // before the fast-path start tries to run it.
+      if (!(await ensureImageForVersion(loadManifest()))) return { ok: false, error: 'image-missing' };
       await supervisor.quickStart(envPath, (e) => send('progress', e));
     } else {
       const assetsDir = await resolveAssetsDir(loadManifest());

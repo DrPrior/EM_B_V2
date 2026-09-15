@@ -175,7 +175,7 @@ async function runFirstRun(emit, assetsDir) {
   step('start', 'active', 'Starting the assistant…');
   await compose.up(envPath, (l) => step('start', 'active', l));
   const healthy = await supervisor.waitForHealth(120, 2000);
-  if (!healthy) throw new Error('The API did not become healthy in time.');
+  if (!healthy) throw await supervisor.healthTimeoutError(envPath);
   step('start', 'done', 'Ready.');
 
   // Mark first run complete.

@@ -48,32 +48,54 @@ function apiGet(pathname, timeoutMs = 4000) {
   });
 }
 
-/** POST JSON and invoke onObject for each newline-delimited JSON chunk streamed back. */
-function apiPostStream(pathname, payload, onObject) {
+/**
+ * POST JSON and invoke onObject for each newline-delimited JSON chunk streamed
+ * back.
+ *
+ * `idleTimeoutMs` is an *inactivity* timeout, not a total one: it fires only
+ * when the socket goes quiet for that long. A healthy multi-GB pull keeps
+ * emitting progress lines (each resets the timer), so a genuine long download
+ * never trips it — but a stalled pull/create (unreachable registry, a proxy
+ * blackholing ollama.com on a locked-down machine) is turned into a clear
+ * rejection instead of an indefinite silent hang. Ollama also reports pull/
+ * create failures as a streamed `{"error": ...}` line with HTTP 200, so those
+ * are detected explicitly rather than swallowed as progress.
+ */
+function apiPostStream(pathname, payload, onObject, idleTimeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
+    let streamErr = null;
     const req = http.request(
-      { host: HOST, port: PORT, path: pathname, method: 'POST',
+      { host: HOST, port: PORT, path: pathname, method: 'POST', timeout: idleTimeoutMs,
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },
       (res) => {
         let buf = '';
+        const handle = (line) => {
+          let obj;
+          try { obj = JSON.parse(line); } catch { return; /* ignore partial */ }
+          if (obj && obj.error) { streamErr = new Error(`${pathname} → ${obj.error}`); return; }
+          onObject(obj);
+        };
         res.on('data', (chunk) => {
           buf += chunk.toString();
           let idx;
           while ((idx = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, idx).trim();
             buf = buf.slice(idx + 1);
-            if (!line) continue;
-            try { onObject(JSON.parse(line)); } catch { /* ignore partial */ }
+            if (line) handle(line);
           }
         });
         res.on('end', () => {
-          if (buf.trim()) { try { onObject(JSON.parse(buf.trim())); } catch { /* ignore */ } }
-          if (res.statusCode >= 400) reject(new Error(`${pathname} → HTTP ${res.statusCode}`));
+          if (buf.trim()) handle(buf.trim());
+          if (streamErr) reject(streamErr);
+          else if (res.statusCode >= 400) reject(new Error(`${pathname} → HTTP ${res.statusCode}`));
           else resolve();
         });
       },
     );
+    // Inactivity timeout: destroy the socket so 'error' rejects with a clear cause.
+    req.on('timeout', () =>
+      req.destroy(new Error(`${pathname} stalled (no data for ${idleTimeoutMs / 1000}s)`)));
     req.on('error', reject);
     req.write(data);
     req.end();

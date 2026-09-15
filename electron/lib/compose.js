@@ -46,4 +46,17 @@ async function psState(envPath, service) {
   return code === 0 ? stdout.trim() : '';
 }
 
-module.exports = { PROJECT, NEO4J_VOLUME, baseArgs, up, down, stop, runOneOff, psState };
+/**
+ * Last `tail` log lines from a service (best-effort, for diagnostics). The API's
+ * real startup failure (Neo4j unreachable/auth, host Ollama unreachable) is
+ * fail-fast inside the container and only appears here — never in `up -d`
+ * output — so callers surface this when a health check times out. Returns '' if
+ * the log can't be read.
+ */
+async function logs(envPath, service, tail = 40) {
+  const { code, stdout, stderr } = await run(
+    'docker', [...baseArgs(envPath), 'logs', '--tail', String(tail), service]);
+  return code === 0 ? (stdout || stderr).trim() : '';
+}
+
+module.exports = { PROJECT, NEO4J_VOLUME, baseArgs, up, down, stop, runOneOff, psState, logs };

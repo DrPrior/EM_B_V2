@@ -18,7 +18,6 @@ This module drives that over the Ollama REST API, all idempotent:
 """
 
 import logging
-import sys
 from pathlib import Path
 
 import requests
@@ -26,14 +25,8 @@ import requests
 from src.core import paths
 from src.core.config import settings
 
+# Handled by the "em_b" handler installed in src.core.logging_config.
 logger = logging.getLogger("em_b.bootstrap")
-
-if not logger.handlers and not logging.getLogger().handlers:
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logger.addHandler(_handler)
-    logger.propagate = False
-logger.setLevel(logging.INFO)
 
 # (variant name, Modelfile path, base model the variant is built FROM).
 # Aligned with the FROM lines in Modelfile / Modelfile.embeddings. Paths resolve

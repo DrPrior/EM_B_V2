@@ -5,6 +5,7 @@ Integration tests (marked ``integration``) talk to the live containers and are
 excluded from the default run — see ``pyproject.toml``.
 """
 
+import logging
 import os
 
 import pytest
@@ -23,6 +24,38 @@ def reset_rate_limiter():
     limiter.reset()
     yield
     limiter.reset()
+
+
+@pytest.fixture(autouse=True)
+def restore_logging_state():
+    """Undo any logging configuration a test performs.
+
+    ``configure_logging`` mutates process-global loggers (handlers, level,
+    ``propagate``). Left in place, it would stop later tests' ``caplog`` from
+    seeing ``em_b`` records and keep rotating-file handles open on Windows temp
+    dirs. Snapshot before each test, restore and close strays after.
+    """
+    names = ("em_b", "uvicorn", "uvicorn.access")
+    saved = {
+        name: (
+            list(logging.getLogger(name).handlers),
+            logging.getLogger(name).level,
+            logging.getLogger(name).propagate,
+        )
+        for name in names
+    }
+    yield
+    for name, (handlers, level, propagate) in saved.items():
+        logger = logging.getLogger(name)
+        for handler in list(logger.handlers):
+            if handler not in handlers:
+                logger.removeHandler(handler)
+                handler.close()
+        for handler in handlers:
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+        logger.setLevel(level)
+        logger.propagate = propagate
 
 
 @pytest.fixture

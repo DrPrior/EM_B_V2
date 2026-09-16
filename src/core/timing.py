@@ -14,24 +14,15 @@ All helpers no-op when ``settings.timing_log_enabled`` is false.
 """
 
 import logging
-import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from src.core.config import settings
 
+# Output destination (console or rotating file) comes from the handler that
+# src.core.logging_config installs on the parent "em_b" logger.
 logger = logging.getLogger("em_b.timing")
-
-# Attach a stdout handler once, only if the root logger isn't already
-# configured, so timing lines show up in the API's stdout (uvicorn) output
-# without double-logging when a handler chain already exists.
-if not logger.handlers and not logging.getLogger().handlers:
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logger.addHandler(_handler)
-    logger.propagate = False
-
 logger.setLevel(settings.timing_log_level.upper())
 
 

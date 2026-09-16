@@ -6,6 +6,7 @@ and to classify documents into material type categories.
 
 import importlib
 import json
+import logging
 import re
 import sys
 from pathlib import Path
@@ -15,6 +16,8 @@ sys.path.insert(0, str(project_root))
 
 generate_response = importlib.import_module("src.services.llm").generate_response
 settings = importlib.import_module("src.core.config").settings
+
+logger = logging.getLogger("em_b.extract")
 
 
 _ENTITY_PROMPT = """\
@@ -101,6 +104,13 @@ def extract_entities(text: str, session_id: str | None = None) -> dict:
         )
         data = _parse_json(raw)
     except Exception:
+        # Callers treat "no entities" as normal, so this failure is otherwise
+        # invisible — at query time it silently disables graph retrieval.
+        logger.warning(
+            "Entity extraction failed; returning no entities (sid=%s)",
+            session_id,
+            exc_info=True,
+        )
         return empty
 
     return {
@@ -141,4 +151,9 @@ def extract_material_type(filename: str, excerpt: str) -> str:
         mt = data.get("material_type", "Other")
         return mt.strip() if isinstance(mt, str) and mt.strip() else "Other"
     except Exception:
+        logger.warning(
+            "Material-type classification failed for %s; defaulting to Other",
+            filename,
+            exc_info=True,
+        )
         return "Other"

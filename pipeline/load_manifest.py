@@ -22,6 +22,7 @@ from pathlib import Path
 from neo4j import ManagedTransaction, Session  # type: ignore[import-untyped]
 
 from src.core.config import settings
+from src.core.logging_config import configure_logging
 from src.database import schema
 from src.database.connection import Neo4jConnection
 
@@ -365,6 +366,9 @@ def load_manifests(
 
 
 if __name__ == "__main__":
+    # Timing/extraction loggers have no handler of their own; install the
+    # shared one (console, or LOG_DIR files) so their output isn't dropped.
+    configure_logging()
     nc = Neo4jConnection.get_instance()
     try:
         with nc.session() as session:

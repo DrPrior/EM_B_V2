@@ -4,6 +4,7 @@ This module provides REST API endpoints for querying and searching
 the Neo4j knowledge graph.
 """
 
+import logging
 from collections.abc import Generator
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,6 +16,7 @@ from src.models import NodeResponse, SearchResponse
 from src.services.embeddings import generate_embedding
 
 router = APIRouter(prefix="/graph", tags=["graph"])
+logger = logging.getLogger("em_b.graph")
 
 
 def get_session() -> Generator[Session, None, None]:
@@ -72,6 +74,7 @@ def get_nodes(session: Session = Depends(get_session)) -> list[NodeResponse]:
         ]
         return nodes
     except Exception as e:
+        logger.exception("Failed to retrieve nodes")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve nodes: {str(e)}",
@@ -138,6 +141,7 @@ def get_node_by_id(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Failed to retrieve node %s", node_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve node: {str(e)}",
@@ -218,6 +222,7 @@ def search_nodes(q: str, session: Session = Depends(get_session)) -> SearchRespo
             results=nodes,
         )
     except Exception as e:
+        logger.exception("Text search failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
@@ -278,6 +283,7 @@ def vector_search(
     try:
         query_vector = generate_embedding(request.query)
     except Exception as e:
+        logger.exception("Failed to generate embedding for vector search")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate embedding: {str(e)}",
@@ -301,6 +307,7 @@ def vector_search(
             results=nodes,
         )
     except Exception as e:
+        logger.exception("Vector search query failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Vector search failed: {str(e)}",

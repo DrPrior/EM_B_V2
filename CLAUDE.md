@@ -215,8 +215,8 @@ Every chat request runs `_retrieve_and_build_messages()`:
 5. Merge: vector results first, graph results appended — deduped by both `chunk_id` and the first 200 chars of text
 6. Build `[system] + recent history + [user+context]` and hand to the LLM
 
-Graph traversal failures degrade gracefully to vector-only (the exception is
-swallowed). Streaming (`/chat/stream`) and non-streaming (`/chat/`) share the same
+Graph traversal failures degrade gracefully to vector-only, logged at WARNING
+with the traceback. Streaming (`/chat/stream`) and non-streaming (`/chat/`) share the same
 retrieval path. The token generator in `stream_answer()` stores the turn in
 session history via a `finally` block, so history survives an early client
 disconnect.
@@ -287,6 +287,9 @@ reads them from `os.environ` directly.
 | `data_root` | `/app/project_data` | Ingestion root **and** the base for `/files` citation links |
 | `ollama_base_url` | `http://localhost:11434` | Host-native Ollama |
 | `ollama_startup_retries` / `_delay` / `_request_timeout` / `_pull_timeout` | 5 / 3.0s / 10s / 1800s | Bootstrap retry + timeout budget (pull covers a ~10 GB cold download) |
+| `log_dir` | `None` | `LOG_DIR` — set (or running frozen) ⇒ rotating `api.log` files only; unset ⇒ console only. See Logging below |
+| `log_level` | `INFO` | Level for all `em_b.*` loggers. `DEBUG` also logs user question text |
+| `log_max_bytes` / `log_backup_count` | 10 MB / 5 | `api.log` rotation size and backups kept |
 | `timing_log_enabled` | `True` | Master switch for per-stage query timing logs (`em_b.timing` logger) |
 | `timing_log_level` | `INFO` | Log level for the timing logger |
 
@@ -304,6 +307,38 @@ extract_entities / graph_query) plus one `ollama call=… …` line per Ollama c
 carrying the model's internal `load`/`prompt_eval`/`eval` durations — correlated
 by a short `sid`. Use these to attribute query latency and to confirm models stay
 warm (low `load=` ms) under `OLLAMA_KEEP_ALIVE`.
+
+### Logging ([src/core/logging_config.py](src/core/logging_config.py), [electron/lib/logger.js](electron/lib/logger.js))
+
+Every Python logger is `logging.getLogger("em_b.<area>")` (`em_b.main`, `em_b.rag`,
+`em_b.chat`, `em_b.timing`, …). **Modules never attach handlers.** `configure_logging()`
+installs the single handler on `em_b`; it runs first in the lifespan and at the top
+of each `pipeline/*.py` `__main__` block. Anything new that runs standalone must call
+it too, or its INFO records are silently dropped.
+
+One destination, never both:
+
+- **Console** — dev (`dev-up.ps1`, `uvicorn --reload`, `python -m pipeline.*`).
+- **Rotating files** — when `LOG_DIR` is set or the app is frozen. `api.log` gets the
+  `em_b.*` records **and** uvicorn's loggers, rerouted because `uvicorn.run` installs
+  console handlers before the lifespan. Set `LOG_DIR` in dev to test this path.
+
+The Electron shell mirrors this: `electron.log` (shell events, wizard step
+transitions, Neo4j and API child stdout/stderr) in `<userData>/logs` when packaged,
+the console in dev unless `LOG_DIR` is set. It passes that dir to the API as
+`LOG_DIR`, so **one folder holds both files**. That's what a user sends when reporting
+a problem. The two files share a line format.
+
+Rules for new code:
+
+- **Log before raising `HTTPException` from a broad `except`**: `logger.exception(...)`.
+  The HTTP body reaches the client, not the log.
+- **Never swallow silently.** A graceful fallback logs WARNING with `exc_info=True`.
+- **Privacy:** user question text only at DEBUG; retrieved chunk text never. INFO
+  and above carry ids, filenames, scores, counts, timings, so a default-level log is
+  safe to send.
+- Tests: `tests/conftest.py` restores logger state after each test. Use
+  `caplog.set_level(..., logger="em_b")` to assert on records.
 
 ### Hot reload
 
@@ -338,6 +373,11 @@ navigates to `http://127.0.0.1:8000` once `/health` is green. **Broken today** �
 rewrites it to spawn native Neo4j and the frozen API directly. Tests use Node's
 built-in runner (`node --test`).
 
+When launching `electron .` from a VS Code terminal, clear `ELECTRON_RUN_AS_NODE`
+first (`Remove-Item Env:ELECTRON_RUN_AS_NODE`). The extension host sets it, which
+makes Electron run as plain Node, so `require('electron')` returns a path string and
+`app` is undefined.
+
 ## Coding Standards
 
 These conventions are enforced across the codebase. Follow them in all new code.
@@ -345,11 +385,10 @@ These conventions are enforced across the codebase. Follow them in all new code.
 ### Python
 
 - **Type hints:** annotate every argument and return type, modern syntax (`list[str]`, `str | None` — not `List[str]`, `Optional[str]`)
-- **Dependency management:** install into your conda/venv with plain pip — `python -m pip install -r requirements.txt`. Do **not** run `uv pip install` against a conda env; uv treats it as a system Python and refuses unless pointed at it explicitly (`uv pip install --python "$env:CONDA_PREFIX\python.exe" ...`).
-  - **`requirements-dev.txt` is gitignored and not present in a fresh clone**, even though `docs/NATIVE_DEV.md` and `scripts/dev-up.ps1` reference it. Install dev tooling (`pytest`, `ruff`) yourself, or recreate the file locally.
+- **Dependency management:** install into your conda/venv with plain pip — `python -m pip install -r requirements-dev.txt` (runtime deps plus ruff, pytest, httpx, pyinstaller). Do **not** run `uv pip install` against a conda env; uv treats it as a system Python and refuses unless pointed at it explicitly (`uv pip install --python "$env:CONDA_PREFIX\python.exe" ...`).
 - **Formatting & linting:** Ruff, line length 88, `target-version = "py312"`. `ruff format` (Black-compatible) and `ruff check`. Rules `E,F,I,W,UP,B`; isort first-party = `src`, `pipeline`, `tests`. Config in [pyproject.toml](pyproject.toml).
 - **Docstrings:** Google-style for all modules, classes, and public functions
-- **String formatting:** f-strings exclusively — no `.format()` or `%`
+- **String formatting:** f-strings exclusively — no `.format()` or `%` — **except in logging calls**, which use lazy `%`-style args: `logger.info("Connected (version %s)", version)`, never `logger.info(f"...")`. The logging module only formats a record that passes the level filter, so per-query DEBUG lines cost nothing when disabled.
 - **Resource management:** always use context managers for file I/O and connections
 - **No mutable defaults**
 

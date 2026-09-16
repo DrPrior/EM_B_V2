@@ -1,5 +1,6 @@
 """Unit tests for the RAG retrieval pipeline (Neo4j + Ollama mocked)."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -369,3 +370,60 @@ def test_stream_answer_stores_full_answer_after_exhaustion(isolated_store) -> No
         {"role": "user", "content": "q"},
         {"role": "assistant", "content": "Hello"},
     ]
+
+
+def test_graph_failure_is_logged_as_warning(isolated_store, caplog) -> None:
+    service = RAGService()
+    db = MagicMock()
+    db.run.return_value = [_vector_record("c1", "vector chunk", 0.9, "vec.pdf")]
+    caplog.set_level(logging.INFO, logger="em_b")
+
+    with (
+        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch(
+            "src.services.rag.extract_entities",
+            side_effect=RuntimeError("LLM down"),
+        ),
+    ):
+        sid, _, _ = service._retrieve_and_build_messages("q", db, None)
+
+    (warning,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warning.name == "em_b.rag"
+    assert "vector results only" in warning.getMessage()
+    assert sid in warning.getMessage()
+    assert warning.exc_info is not None
+
+
+def test_question_text_not_logged_at_info(isolated_store, caplog) -> None:
+    service = RAGService()
+    db = MagicMock()
+    db.run.return_value = [_vector_record("c1", "secret chunk", 0.9, "a.pdf")]
+    caplog.set_level(logging.INFO, logger="em_b")
+
+    with (
+        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
+    ):
+        service._retrieve_and_build_messages("my private question", db, None)
+
+    logged = caplog.text
+    assert "my private question" not in logged
+    assert "secret chunk" not in logged
+    # The INFO retrieval summary still identifies what was used.
+    assert "a.pdf" in logged
+
+
+def test_question_text_logged_at_debug(isolated_store, caplog) -> None:
+    service = RAGService()
+    db = MagicMock()
+    db.run.return_value = []
+    caplog.set_level(logging.DEBUG, logger="em_b")
+
+    with (
+        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
+    ):
+        service._retrieve_and_build_messages("my private question", db, None)
+
+    debug = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any("my private question" in r.getMessage() for r in debug)

@@ -12,8 +12,22 @@ const fs = require('fs');
 const path = require('path');
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 
-const supervisor = require('./supervisor');
 const paths = require('./lib/paths');
+const logger = require('./lib/logger');
+
+// Configure logging before anything else loads, so module-load and first-run
+// failures are recorded. Packaged: rotating files under userData/logs. Dev: the
+// console, unless LOG_DIR is set to exercise file mode (same rule as the API).
+let logDirError = null;
+try {
+  logger.configure({ dir: app.isPackaged ? paths.logsDir() : process.env.LOG_DIR || null });
+} catch (err) {
+  logger.configure({ dir: null });
+  logDirError = err;
+}
+const log = logger.getLogger('main');
+
+const supervisor = require('./supervisor');
 const assets = require('./lib/assets');
 const docker = require('./lib/docker');
 const { runFirstRun, RebootRequiredError, loadManifest } = require('./lib/firstrun');
@@ -21,6 +35,18 @@ const { ensureEnvFile } = require('./lib/envfile');
 const { ensureImageForVersion: ensureImage } = require('./lib/imageupdate');
 
 const APP_URL = 'http://127.0.0.1:8000';
+
+log.info(
+  'App starting: version=%s electron=%s platform=%s packaged=%s logs=%s',
+  app.getVersion(), process.versions.electron, process.platform, app.isPackaged,
+  logger.logDir() || 'console',
+);
+if (logDirError) log.error('Could not use the logs directory; logging to console:', logDirError);
+
+// uncaughtExceptionMonitor observes without changing Electron's default crash
+// handling. Unhandled rejections don't crash the main process, so log them here.
+process.on('uncaughtExceptionMonitor', (err, origin) => log.error('Uncaught exception (%s):', origin, err));
+process.on('unhandledRejection', (reason) => log.error('Unhandled promise rejection:', reason));
 
 let mainWindow = null;
 let envPath = null;
@@ -59,10 +85,16 @@ function createWindow() {
     return { action: 'allow' };
   });
 
+  mainWindow.webContents.on('render-process-gone', (_e, details) =>
+    log.error('Renderer process gone: reason=%s exitCode=%s', details.reason, details.exitCode));
+  mainWindow.webContents.on('did-fail-load', (_e, code, description, url) =>
+    log.error('Page failed to load: %s (%s %s)', url, code, description));
+
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 async function navigateToApp() {
+  log.info('Backend ready; loading %s', APP_URL);
   await mainWindow.loadURL(APP_URL);
 }
 
@@ -81,9 +113,13 @@ async function resolveAssetsDir(manifest) {
       properties: ['openDirectory'],
       buttonLabel: 'Use this folder',
     });
-    if (res.canceled || !res.filePaths.length) return null;
+    if (res.canceled || !res.filePaths.length) {
+      log.warn('User cancelled the setup-folder picker');
+      return null;
+    }
     const picked = res.filePaths[0];
     if (assets.isValidDir(picked, manifest)) { dir = picked; break; }
+    log.warn('Picked folder does not contain setup files: %s', picked);
     await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       message: 'That folder doesn’t contain the setup files.',
@@ -122,14 +158,20 @@ ipcMain.handle('wizard:begin', async () => {
     envPath = ensureEnvFile({ appVersion: version }).path;
 
     if (supervisor.isFirstRunComplete()) {
+      log.info('Starting (fast path), manifest version %s', version);
       // An in-place update bumps the bundled image version but keeps the
       // first-run marker, so make sure that version's image is actually loaded
       // before the fast-path start tries to run it.
-      if (!(await ensureImageForVersion(loadManifest()))) return { ok: false, error: 'image-missing' };
+      if (!(await ensureImageForVersion(loadManifest()))) {
+        log.error('Image for version %s is missing; cannot start', version);
+        return { ok: false, error: 'image-missing' };
+      }
       await supervisor.quickStart(envPath, (e) => send('progress', e));
     } else {
+      log.info('Starting guided first run, manifest version %s', version);
       const assetsDir = await resolveAssetsDir(loadManifest());
       if (!assetsDir) {
+        log.error('Setup files not found; first run cannot continue');
         send('error', { message: 'Setup files not found. Plug in the USB drive that came with the app and try again.' });
         return { ok: false, error: 'no-assets' };
       }
@@ -139,9 +181,11 @@ ipcMain.handle('wizard:begin', async () => {
     return { ok: true };
   } catch (err) {
     if (err instanceof RebootRequiredError) {
+      log.warn('Reboot required to continue setup: %s', err.message);
       send('reboot', { message: err.message });
       return { ok: false, reboot: true };
     }
+    log.error('Startup failed:', err);
     send('error', { message: err.message });
     return { ok: false, error: err.message };
   }
@@ -157,6 +201,10 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(createWindow);
 
+  app.on('child-process-gone', (_e, details) =>
+    log.error('Electron child process gone: type=%s reason=%s exitCode=%s',
+      details.type, details.reason, details.exitCode));
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -167,6 +215,7 @@ app.on('before-quit', async (e) => {
   if (quitting || !envPath) return;
   e.preventDefault();
   quitting = true;
+  log.info('Quitting; stopping backend');
   await supervisor.stop(envPath);
   app.quit();
 });

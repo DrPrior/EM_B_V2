@@ -37,3 +37,16 @@ def modelfile_path(name: str) -> Path:
 def static_dir() -> Path:
     """Absolute path to the static web UI directory served at ``/``."""
     return resource_root() / "src" / "static"
+
+
+def default_log_dir() -> Path | None:
+    """Fallback log directory when ``LOG_DIR`` is not set.
+
+    - From source: None — logs go to the console.
+    - Frozen: a ``logs`` directory beside the executable. The one-dir bundle is
+      unpacked under the user's app-data directory, so it is writable. The
+      Electron shell normally overrides this with ``LOG_DIR``.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "logs"
+    return None

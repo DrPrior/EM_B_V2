@@ -181,6 +181,29 @@ class Settings(BaseSettings):
             "serial on the main thread. 1 = fully sequential (the old behavior)."
         ),
     )
+    log_dir: str | None = Field(
+        default=None,
+        description=(
+            "Directory for rotating log files (api.log). When set — or when the "
+            "app runs frozen — logs go to files only; when unset, to the console "
+            "only. The Electron shell sets LOG_DIR for the API it spawns."
+        ),
+    )
+    log_level: str = Field(
+        default="INFO",
+        description=(
+            "Level for the 'em_b' application loggers. DEBUG additionally logs "
+            "user question text, so a DEBUG log file contains user queries."
+        ),
+    )
+    log_max_bytes: int = Field(
+        default=10_000_000,
+        description="Size (bytes) at which api.log rotates.",
+    )
+    log_backup_count: int = Field(
+        default=5,
+        description="Rotated api.log files kept (api.log.1 … api.log.N).",
+    )
     timing_log_enabled: bool = Field(
         default=True,
         description=(

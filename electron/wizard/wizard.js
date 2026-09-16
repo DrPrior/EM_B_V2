@@ -4,11 +4,11 @@
  * Wizard renderer. Renders a per-step checklist and drives it from the main
  * process's `progress` events. Two modes:
  *   - first run  → full provisioning checklist
- *   - subsequent → compact startup (Ollama → Start)
+ *   - subsequent → compact startup (Application update → Ollama → Start)
  * Only window.api (from preload.js) is available — no Node access.
  */
 
-// Step ids mirror lib/firstrun.js and supervisor.quickStart.
+// Step ids mirror lib/firstrun.js, and lib/apibundle.js + supervisor.quickStart.
 const FIRST_RUN_STEPS = [
   ['gpu', 'Detect hardware'],
   ['ollama', 'Ollama'],
@@ -21,6 +21,7 @@ const FIRST_RUN_STEPS = [
 ];
 
 const QUICK_STEPS = [
+  ['runtime', 'Application'],
   ['ollama', 'Ollama'],
   ['start', 'Start assistant'],
 ];

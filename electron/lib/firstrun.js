@@ -36,6 +36,8 @@ const snapshot = require('./snapshot');
 const assets = require('./assets');
 const supervisor = require('../supervisor');
 const logger = require('./logger');
+const apibundle = require('./apibundle');
+const { extractZip, extractTarGz } = require('./archive');
 const { ensureEnvFile } = require('./envfile');
 const { runStream } = require('./exec');
 
@@ -46,20 +48,6 @@ class RebootRequiredError extends Error {}
 
 function loadManifest() {
   return JSON.parse(fs.readFileSync(paths.assetsManifestPath(), 'utf8'));
-}
-
-/** Extract a .zip (Neo4j / JRE / API bundle). `tar` on Win10+/macOS reads zips. */
-async function extractZip(archivePath, destDir, onLine = () => {}) {
-  fs.mkdirSync(destDir, { recursive: true });
-  const { code } = await runStream('tar', ['-xf', archivePath, '-C', destDir], {}, onLine);
-  if (code !== 0) throw new Error(`Failed to extract ${archivePath}`);
-}
-
-/** Extract a .tar.gz (the source corpus). */
-async function extractTarGz(archivePath, destDir, onLine = () => {}) {
-  fs.mkdirSync(destDir, { recursive: true });
-  const { code } = await runStream('tar', ['-xzf', archivePath, '-C', destDir], {}, onLine);
-  if (code !== 0) throw new Error(`Failed to extract ${archivePath}`);
 }
 
 /**
@@ -150,13 +138,19 @@ async function runFirstRun(emit, assetsDir) {
   }
   step('neo4j', 'done', 'Database engine ready.');
 
-  // 5. Runtime — unpack the frozen API bundle.
+  // 5. Runtime — unpack the frozen API bundle (lib/apibundle.js records which
+  //    manifest it came from, so later launches can detect an in-place update).
   step('runtime', 'active', 'Preparing the application…');
-  if (!fs.existsSync(paths.apiExePath())) {
+  const apiTarget = { apiDir: paths.apiDir(), exeName: path.basename(paths.apiExePath()) };
+  if (!apibundle.isInstalled(manifest, apiTarget)) {
     const az = assets.assetPath(assetsDir, manifest, 'apiBundle');
     await assets.verify(az, manifest.apiBundle.sha256);
     step('runtime', 'active', 'Unpacking the application…');
-    await extractZip(az, paths.apiDir(), (l) => step('runtime', 'active', l));
+    await apibundle.installApiBundle(az, manifest, {
+      ...apiTarget,
+      extractZip,
+      onLine: (l) => step('runtime', 'active', l),
+    });
   }
   step('runtime', 'done', 'Application ready.');
 

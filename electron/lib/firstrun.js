@@ -29,8 +29,11 @@ const snapshot = require('./snapshot');
 const compose = require('./compose');
 const assets = require('./assets');
 const supervisor = require('../supervisor');
+const logger = require('./logger');
 const { ensureEnvFile } = require('./envfile');
 const { runStream } = require('./exec');
+
+const log = logger.getLogger('firstrun');
 
 class RebootRequiredError extends Error {}
 
@@ -55,7 +58,15 @@ async function extractTarGz(archivePath, destDir, onLine = () => {}) {
  */
 async function runFirstRun(emit, assetsDir) {
   const manifest = loadManifest();
-  const step = (s, status, message, progress = null) => emit({ step: s, status, message, progress });
+  log.info('First run starting (assets=%s, version=%s)', assetsDir, manifest.image.version);
+  // Every wizard event passes through here, so this one hook records the whole
+  // provisioning run (transitions only, not per-tick download progress).
+  const logProgress = logger.progressLogger(log);
+  const step = (s, status, message, progress = null) => {
+    const e = { step: s, status, message, progress };
+    logProgress(e);
+    emit(e);
+  };
 
   // 1. GPU (informational).
   step('gpu', 'active', 'Detecting graphics hardware…');
@@ -175,10 +186,11 @@ async function runFirstRun(emit, assetsDir) {
   step('start', 'active', 'Starting the assistant…');
   await compose.up(envPath, (l) => step('start', 'active', l));
   const healthy = await supervisor.waitForHealth(120, 2000);
-  if (!healthy) throw await supervisor.healthTimeoutError(envPath);
+  if (!healthy) throw await supervisor.healthTimeoutError();
   step('start', 'done', 'Ready.');
 
   // Mark first run complete.
+  log.info('First run complete');
   fs.writeFileSync(paths.firstRunMarkerPath(),
     JSON.stringify({ completedAt: new Date().toISOString(), version: manifest.image.version }), 'utf8');
 

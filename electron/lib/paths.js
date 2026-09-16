@@ -62,6 +62,14 @@ function firstRunMarkerPath() {
   return path.join(userDataDir(), 'first-run-complete.json');
 }
 
+/**
+ * Rotating log files: electron.log (shell + child output) and api.log (handed to
+ * the API as LOG_DIR). The folder a user sends when reporting a problem.
+ */
+function logsDir() {
+  return path.join(userDataDir(), 'logs');
+}
+
 // --- Native runtime locations (decontainerized) ---------------------------
 // The bundled Neo4j server, its JRE, and the frozen API bundle are unpacked
 // under userData by the first-run provisioning (Workstream C/D). The build
@@ -117,6 +125,7 @@ module.exports = {
   snapshotDir,
   envFilePath,
   firstRunMarkerPath,
+  logsDir,
   neo4jHomeDir,
   neo4jBinDir,
   neo4jConsolePath,

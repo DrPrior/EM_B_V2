@@ -217,14 +217,17 @@ userData dir: `first-run-complete.json`, `graph-imported.json`,
   the API container's own startup bootstrap hits its instant warm path. On a
   machine prepped per `docs/TARGET_MACHINE_PREP.md` the pull is skipped and only
   the local variant build runs.
-- **Ollama host env** (`lib/ollamaenv.js`): the container reaches Ollama over
-  `host.docker.internal`, which requires the daemon to bind `0.0.0.0`, so the
-  wizard **persists** `OLLAMA_HOST=0.0.0.0`, `OLLAMA_KEEP_ALIVE=-1`, and
-  `OLLAMA_MAX_LOADED_MODELS=2` — via `setx` (user registry) on Windows, and via
-  `launchctl setenv` **plus a RunAtLoad LaunchAgent** on macOS so they survive a
-  reboot/logout (plain `launchctl setenv` doesn't). It then restarts Ollama so
-  the running daemon picks them up. Idempotent: skipped once the values are in
-  place, and re-checked on every launch (`quickStart`) to self-heal drift.
+- **Ollama host env** (`lib/ollamaenv.js`): the native API reaches Ollama over
+  loopback, so Ollama keeps its default `127.0.0.1` bind and `OLLAMA_HOST` is
+  **not** set. The wizard **persists** the warmth/throughput vars
+  (`OLLAMA_KEEP_ALIVE=-1`, `OLLAMA_MAX_LOADED_MODELS=2`, flash attention, q8_0
+  KV cache, `OLLAMA_NUM_PARALLEL=1`) — via `setx` (user registry) on Windows, and
+  via `launchctl setenv` **plus a RunAtLoad LaunchAgent** on macOS so they
+  survive a reboot/logout (plain `launchctl setenv` doesn't). It also **removes**
+  a user-scope `OLLAMA_HOST=0.0.0.0` left by a Docker-era build (any other value
+  is left alone). It then restarts Ollama so the running daemon picks them up.
+  Idempotent: skipped once the values are in place, and re-checked on every
+  launch (`quickStart`) to self-heal drift.
 - **Credentials**: a random Neo4j password is generated once into `desktop.env`
   and reused forever (it's baked into the `em_b_v2_neo4j_data` volume on first
   DB start). Neo4j and the API bind to `127.0.0.1` only.

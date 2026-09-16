@@ -3,10 +3,10 @@
 /**
  * Locates the offline setup assets shipped on the USB drive.
  *
- * The app is delivered by USB with no download server, so the three heavy custom
- * assets (API image tar, Neo4j snapshot, project_data archive) live in an
- * `assets/` folder next to the installer. Everything else (Docker/Ollama
- * installers, base models) still comes from the internet. These assets are only
+ * The app is delivered by USB with no download server, so the heavy custom
+ * assets (API bundle, Neo4j, JRE, graph snapshot, project_data archive) live in
+ * an `assets/` folder next to the installer. Everything else (the Ollama
+ * installer, base models) still comes from the internet. These assets are only
  * needed during first-run setup — the USB can be removed afterward.
  *
  * Resolution order for the folder:
@@ -15,7 +15,7 @@
  *   3. auto-scan: removable drives and dirs next to the app executable
  *   4. (caller falls back to a native folder picker)
  *
- * A folder is valid if it contains the manifest's image file — the signature.
+ * A folder is valid if it contains the manifest's apiBundle file — the signature.
  */
 
 const fs = require('fs');
@@ -40,10 +40,11 @@ function saveDir(dir) {
   fs.writeFileSync(savedDirPath(), JSON.stringify({ dir }), 'utf8');
 }
 
-/** True if `dir` looks like a setup-assets folder for this manifest. */
+/** True if `dir` looks like a setup-assets folder for this manifest. The frozen
+ * API bundle is the signature file (was the Docker image tar pre-decontainerization). */
 function isValidDir(dir, manifest) {
   try {
-    return !!dir && fs.existsSync(path.join(dir, manifest.image.file));
+    return !!dir && fs.existsSync(path.join(dir, manifest.apiBundle.file));
   } catch { return false; }
 }
 
@@ -89,7 +90,8 @@ function findAssetsDir(manifest) {
   return null;
 }
 
-/** Absolute path to a custom asset (key: 'image' | 'snapshot' | 'projectData'). */
+/** Absolute path to a custom asset
+ * (key: 'apiBundle' | 'neo4j' | 'jre' | 'snapshot' | 'projectData'). */
 function assetPath(dir, manifest, key) {
   return path.join(dir, manifest[key].file);
 }

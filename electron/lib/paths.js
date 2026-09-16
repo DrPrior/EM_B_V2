@@ -3,7 +3,7 @@
 /**
  * Filesystem locations for the desktop app.
  *
- * Bundled resources (the compose file, Modelfiles, asset manifest) live under
+ * Bundled resources (Modelfiles, asset manifest) live under
  * process.resourcesPath when packaged, or the repo root during `npm start`.
  * Per-install state (generated env file, cached downloads, first-run marker)
  * lives under Electron's userData dir so it survives app updates.
@@ -18,10 +18,6 @@ function resourcesRoot() {
   return app.isPackaged
     ? process.resourcesPath
     : path.join(__dirname, '..', '..');
-}
-
-function composePath() {
-  return path.join(resourcesRoot(), 'docker-compose.desktop.yml');
 }
 
 function modelfilePath(name) {
@@ -116,7 +112,6 @@ function apiExePath() {
 
 module.exports = {
   resourcesRoot,
-  composePath,
   modelfilePath,
   assetsManifestPath,
   userDataDir,

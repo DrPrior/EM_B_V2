@@ -4,7 +4,7 @@
  * Electron main process: single window that starts life as the setup wizard /
  * splash, then navigates to the local web UI (http://127.0.0.1:8000) once the
  * backend is healthy. On first launch it runs the guided provisioning
- * (Docker → Ollama → models → image → data → snapshot → start); on later
+ * (GPU → Ollama → models → Neo4j → runtime → data → snapshot → start); on later
  * launches it takes the fast path of just bringing the stack up.
  */
 
@@ -29,10 +29,8 @@ const log = logger.getLogger('main');
 
 const supervisor = require('./supervisor');
 const assets = require('./lib/assets');
-const docker = require('./lib/docker');
 const { runFirstRun, RebootRequiredError, loadManifest } = require('./lib/firstrun');
 const { ensureEnvFile } = require('./lib/envfile');
-const { ensureImageForVersion: ensureImage } = require('./lib/imageupdate');
 
 const APP_URL = 'http://127.0.0.1:8000';
 
@@ -54,7 +52,7 @@ let quitting = false;
 
 function manifestVersion() {
   try {
-    return JSON.parse(fs.readFileSync(paths.assetsManifestPath(), 'utf8')).image.version;
+    return JSON.parse(fs.readFileSync(paths.assetsManifestPath(), 'utf8')).version;
   } catch {
     return 'latest';
   }
@@ -123,26 +121,11 @@ async function resolveAssetsDir(manifest) {
     await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       message: 'That folder doesn’t contain the setup files.',
-      detail: `Expected to find "${manifest.image.file}" inside it. Pick the "assets" folder from the USB drive.`,
+      detail: `Expected to find "${manifest.apiBundle.file}" inside it. Pick the "assets" folder from the USB drive.`,
     });
   }
   if (dir) assets.saveDir(dir);
   return dir;
-}
-
-/**
- * Load the current manifest version's API image before the fast-path start if
- * it isn't already present (in-place update). Wires the real docker/assets/USB
- * resolver into lib/imageupdate.js; see that module for the full rationale.
- */
-function ensureImageForVersion(manifest) {
-  return ensureImage(manifest, {
-    docker,
-    assets,
-    resolveAssetsDir,
-    emit: (e) => send('progress', e),
-    onError: (message) => send('error', { message }),
-  });
 }
 
 // Renderer asks what mode to show.
@@ -159,13 +142,6 @@ ipcMain.handle('wizard:begin', async () => {
 
     if (supervisor.isFirstRunComplete()) {
       log.info('Starting (fast path), manifest version %s', version);
-      // An in-place update bumps the bundled image version but keeps the
-      // first-run marker, so make sure that version's image is actually loaded
-      // before the fast-path start tries to run it.
-      if (!(await ensureImageForVersion(loadManifest()))) {
-        log.error('Image for version %s is missing; cannot start', version);
-        return { ok: false, error: 'image-missing' };
-      }
       await supervisor.quickStart(envPath, (e) => send('progress', e));
     } else {
       log.info('Starting guided first run, manifest version %s', version);
@@ -210,7 +186,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-// Tear the stack down cleanly on quit (data persists in the named volume).
+// Tear the stack down cleanly on quit (data persists under userData).
 app.on('before-quit', async (e) => {
   if (quitting || !envPath) return;
   e.preventDefault();

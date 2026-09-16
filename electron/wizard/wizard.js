@@ -4,23 +4,23 @@
  * Wizard renderer. Renders a per-step checklist and drives it from the main
  * process's `progress` events. Two modes:
  *   - first run  → full provisioning checklist
- *   - subsequent → compact startup (Docker → Ollama → Start)
+ *   - subsequent → compact startup (Ollama → Start)
  * Only window.api (from preload.js) is available — no Node access.
  */
 
+// Step ids mirror lib/firstrun.js and supervisor.quickStart.
 const FIRST_RUN_STEPS = [
   ['gpu', 'Detect hardware'],
-  ['docker', 'Docker'],
   ['ollama', 'Ollama'],
   ['models', 'Language models'],
-  ['image', 'Application image'],
+  ['neo4j', 'Database engine'],
+  ['runtime', 'Application'],
   ['data', 'Source documents'],
   ['snapshot', 'Knowledge graph'],
   ['start', 'Start assistant'],
 ];
 
 const QUICK_STEPS = [
-  ['docker', 'Docker'],
   ['ollama', 'Ollama'],
   ['start', 'Start assistant'],
 ];
@@ -116,7 +116,7 @@ async function init() {
 
   renderSteps(firstRun ? FIRST_RUN_STEPS : QUICK_STEPS);
   els.subtitle.textContent = firstRun
-    ? 'First-time setup will install Docker, Ollama, the language models (~10 GB), and the knowledge graph. This can take a while on the first run.'
+    ? 'First-time setup will set up Ollama, the language models (~10 GB), and the knowledge graph. This can take a while on the first run.'
     : 'Starting the assistant…';
   els.hint.textContent = firstRun
     ? 'You only need to do this once. A network connection is required.'
@@ -126,8 +126,7 @@ async function init() {
   window.api.onError(({ message }) => showBanner('err', `Setup failed: ${message}`));
   window.api.onReboot(({ message }) =>
     showBanner('warn',
-      `Docker Desktop needs to finish installing before setup can continue ` +
-      `(this usually requires a restart). Once Docker is installed and running, ` +
+      `A restart is required before setup can continue. Restart your computer, then ` +
       `reopen this app and setup will resume where it left off.<br><small>${message || ''}</small>`));
 
   if (firstRun) {

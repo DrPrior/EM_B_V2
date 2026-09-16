@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
@@ -12,6 +13,8 @@ from src.core.timing import log_rag_stages, timed
 from src.services.embeddings import generate_embedding
 from src.services.llm import generate_chat_response, generate_chat_stream
 from src.services.session import conversation_store
+
+logger = logging.getLogger("em_b.rag")
 
 # Delimiters that fence off untrusted user input in the prompt. The system
 # prompt instructs the model to treat anything between them as data, never as
@@ -129,10 +132,15 @@ class RAGService:
         sid, history = conversation_store.get_or_create(session_id)
         stage_ms: dict[str, float] = {}
 
+        # Privacy: question text is DEBUG-only. INFO-level log files must stay
+        # safe to send when a user reports a problem.
+        logger.debug("question sid=%s text=%r", sid, question)
+
         try:
             with timed("embed", stage_ms):
                 question_vector = generate_embedding(question, session_id=sid)
         except Exception as e:
+            logger.exception("Embedding the question failed (sid=%s)", sid)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate embeddings: {str(e)}",
@@ -169,7 +177,13 @@ class RAGService:
                         )
                     )
         except Exception:
-            pass  # graph traversal is additive — degrade gracefully to vector-only
+            # Graph traversal is additive — degrade gracefully to vector-only,
+            # but record it: otherwise a half-broken query looks healthy.
+            logger.warning(
+                "Graph traversal failed; answering from vector results only (sid=%s)",
+                sid,
+                exc_info=True,
+            )
 
         log_rag_stages(stage_ms, sid)
 
@@ -212,6 +226,15 @@ class RAGService:
                         "superseded_by": _superseded_by(r),
                     }
                 )
+
+        logger.info(
+            "retrieval sid=%s vector=%d graph=%d merged=%d sources=%s",
+            sid,
+            len(vector_records),
+            len(graph_records),
+            len(merged),
+            [(r["filename"], r["score"]) for r in merged],
+        )
 
         sources = []
         for r in merged:
@@ -270,6 +293,7 @@ class RAGService:
         try:
             answer = generate_chat_response(messages, session_id=sid)
         except Exception as e:
+            logger.exception("Answer generation failed (sid=%s)", sid)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate response: {str(e)}",

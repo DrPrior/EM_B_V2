@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Generator
 
 from fastapi import (  # type: ignore[import-untyped]
@@ -32,6 +33,7 @@ from src.services.ollama_bootstrap import (
 #   curl.exe -s -X POST http://localhost:8000/admin/load-manifest | python -m json.tool
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger("em_b.admin")
 
 
 class IngestRequest(BaseModel):
@@ -81,6 +83,7 @@ def trigger_ingestion(
     try:
         stats = ingest_project_data(session, data_root=request.data_root)
     except Exception as e:
+        logger.exception("Ingestion failed for data_root=%s", request.data_root)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ingestion failed: {str(e)}",
@@ -107,6 +110,7 @@ def trigger_manifest_load(
     try:
         stats = load_manifests(session, data_root=request.data_root)
     except Exception as e:
+        logger.exception("Manifest load failed for data_root=%s", request.data_root)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Manifest load failed: {str(e)}",
@@ -130,11 +134,13 @@ def trigger_model_bootstrap() -> BootstrapResponse:
         wait_for_ollama()
         ensure_models()
     except OllamaUnavailableError as e:
+        logger.warning("Model bootstrap requested but Ollama is unavailable: %s", e)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(e),
         ) from e
     except Exception as e:
+        logger.exception("Model bootstrap failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Model bootstrap failed: {str(e)}",

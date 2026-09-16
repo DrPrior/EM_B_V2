@@ -1,5 +1,6 @@
 """Unit tests for the graph router (Neo4j + embeddings mocked)."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -102,3 +103,15 @@ def test_vector_search_embedding_failure_returns_500(
         resp = client.post("/graph/search", json={"query": "hello"})
 
     assert resp.status_code == 500
+
+
+def test_get_nodes_failure_is_logged(client: TestClient, mock_session, caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="em_b")
+    mock_session.execute_read.side_effect = RuntimeError("bolt closed")
+
+    resp = client.get("/graph/nodes")
+
+    assert resp.status_code == 500
+    (record,) = caplog.records
+    assert record.name == "em_b.graph"
+    assert record.exc_info is not None

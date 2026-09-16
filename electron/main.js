@@ -29,6 +29,8 @@ const log = logger.getLogger('main');
 
 const supervisor = require('./supervisor');
 const assets = require('./lib/assets');
+const { ensureApiBundle } = require('./lib/apibundle');
+const { extractZip } = require('./lib/archive');
 const { runFirstRun, RebootRequiredError, loadManifest } = require('./lib/firstrun');
 const { ensureEnvFile } = require('./lib/envfile');
 
@@ -128,6 +130,23 @@ async function resolveAssetsDir(manifest) {
   return dir;
 }
 
+/**
+ * Install the current manifest's API bundle before the fast-path start if an
+ * in-place update changed it. Wires the real paths/assets/USB resolver into
+ * lib/apibundle.js; see that module for the full rationale.
+ */
+function ensureApiBundleForVersion(manifest) {
+  return ensureApiBundle(manifest, {
+    apiDir: paths.apiDir(),
+    exeName: path.basename(paths.apiExePath()),
+    extractZip,
+    assets,
+    resolveAssetsDir,
+    emit: (e) => send('progress', e),
+    onError: (message) => send('error', { message }),
+  });
+}
+
 // Renderer asks what mode to show.
 ipcMain.handle('wizard:getState', () => ({
   firstRunComplete: supervisor.isFirstRunComplete(),
@@ -142,6 +161,12 @@ ipcMain.handle('wizard:begin', async () => {
 
     if (supervisor.isFirstRunComplete()) {
       log.info('Starting (fast path), manifest version %s', version);
+      // An in-place update ships a new manifest but keeps the first-run marker,
+      // so install that version's API bundle before starting it.
+      if (!(await ensureApiBundleForVersion(loadManifest()))) {
+        log.error('API bundle for version %s is not installed; cannot start', version);
+        return { ok: false, error: 'update-not-installed' };
+      }
       await supervisor.quickStart(envPath, (e) => send('progress', e));
     } else {
       log.info('Starting guided first run, manifest version %s', version);

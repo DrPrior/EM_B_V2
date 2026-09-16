@@ -46,16 +46,18 @@ electron/
   main.js            app lifecycle + window; runs wizard or fast-start, then
                      navigates to http://127.0.0.1:8000
   preload.js         contextIsolated bridge (window.api)
-  supervisor.js      compose up/down, /health polling, quickStart fast path
+  supervisor.js      start/stop native Neo4j + API, /health polling, quickStart fast path
   lib/
     firstrun.js      guided first-run orchestrator (the step sequence)
     assets.js        locate the USB `assets/` folder (auto-detect + verify)
-    docker.js        detect/install Docker, load image, run compose
+    apibundle.js     install the frozen API bundle; reinstall it after an in-place update
+    archive.js       zip / tar.gz extraction via the OS `tar`
+    procs.js         spawn + readiness-check the Neo4j and API child processes
+    logger.js        rotating electron.log (or console in dev)
     ollama.js        detect/install Ollama, pull bases + build variants (streamed)
     ollamaenv.js     persist host OLLAMA_* env vars (setx / launchd agent) + restart
     modelfile.js     Node port of ollama_bootstrap._parse_modelfile
     snapshot.js      Node port of scripts/import-graph.ps1 (offline dump load)
-    compose.js       shared `docker compose --env-file … -f …` invocation
     envfile.js       per-install desktop.env (random, stable Neo4j password)
     download.js      streaming downloader w/ progress + SHA-256 verify + cache
     gpu.js           best-effort GPU detection (messaging only)
@@ -85,6 +87,22 @@ LaunchAgent plist/path, `REQUIRED`). The process-spawning paths
 (`ensure`/`persist*`/`restartOllama`, which call `setx`/`launchctl`/`taskkill`
 and restart Ollama) are intentionally **not** unit-tested — validate those on a
 real machine via the verification checklist below.
+
+`test/apibundle.test.js` covers API-bundle install and in-place update against
+real temp dirs with a fake extractor: the version/checksum comparison, replacing
+an old bundle wholesale, and that a missing/wrong USB, a bad archive, or an
+interrupted swap never leaves the previous install broken.
+
+### In-place updates
+
+A new app build ships a new `assets.manifest.json` but keeps the first-run
+marker, so launches take the fast path. Before starting the stack, `main.js`
+runs `lib/apibundle.js`: the installed bundle carries a
+`.installed-bundle.json` marker (manifest `version` + `apiBundle.sha256`), and
+on a mismatch the new `emb-api.zip` is read from the USB `assets/` folder
+(prompting for it if needed), verified, extracted to `api.new/`, and swapped in.
+Only the API bundle is updated this way; Neo4j, the JRE, the snapshot, and the
+corpus are still installed once, at first run.
 
 ## Preparing a USB drive (maintainer)
 
@@ -256,5 +274,5 @@ On a clean machine/VM:
 
 - **Code signing / notarization**: add `win.certificateFile` /
   `mac.notarize` in `package.json` `build` — config only.
-- **Auto-update**: add `electron-updater` + an update feed. The versioned image
-  tag + manifest already support shipping new backends.
+- **Auto-update**: add `electron-updater` + an update feed. The versioned
+  manifest + `lib/apibundle.js` already install a new API bundle in place.

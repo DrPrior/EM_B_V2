@@ -35,17 +35,15 @@
   processes. There is no container runtime.
 </p>
 
-<div class="note warn">
-  <strong>⚠️ Decontainerization in progress — this explainer describes the native target</strong>
+<div class="note">
+  <strong>Decontainerized — every service is a native host process</strong>
   <p>
-    Docker is being removed (UALR no longer permits it), so Neo4j and the API move from containers to
-    <strong>native host processes</strong>; Ollama was always host-native. These pages now describe that
-    <strong>native</strong> architecture. The canonical migration plan — with the current-vs-target
-    diagram and the open decisions — is
+    Docker was removed (UALR no longer permits it): Neo4j and the API run as <strong>native host
+    processes</strong>, and Ollama always did. The code migration is complete, including the Electron
+    shell and the build scripts; what remains is release-artifact work (staging a Community Neo4j and a
+    JRE, code-signing, a clean-machine test). The canonical plan is
     <a class="ref" href="../../docs/DECONTAINERIZE_PLAN.md">docs/DECONTAINERIZE_PLAN.md</a>; the developer
-    runbook is <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>. Not every refactor
-    has landed on <code>main</code> yet (the Electron shell still spawns the old Docker stack until
-    Workstream&nbsp;D lands), but new work — and this explainer — assumes the native end state.
+    runbook is <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>.
   </p>
 </div>
 

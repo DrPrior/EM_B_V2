@@ -82,6 +82,32 @@ real temp dirs with a fake extractor: the version/checksum comparison, replacing
 an old bundle wholesale, and that a missing/wrong USB, a bad archive, or an
 interrupted swap never leaves the previous install broken.
 
+`test/procs.test.js` covers the readiness probes against throwaway local
+HTTP/TCP listeners — `/health` must be 200 *and* `{"status":"healthy"}`, a
+non-JSON body or a dead port is "not ready" rather than an exception, and the
+waits are bounded. This is the ordering Docker's `depends_on: service_healthy`
+used to provide.
+
+`test/archive.test.js` runs against the real OS `tar` and pins the positional
+contract shared by `build-release.ps1`, `lib/archive.js` and `lib/paths.js`: a
+contents-at-root zip must land at `<userData>/api/emb-api.exe` with no extra
+nesting, and `project_data.tar.gz` must keep its top-level directory.
+
+`test/envfile.test.js` pins `parseEnv` and, above all, that the generated Neo4j
+password **survives a second call** — it is baked into the store on first run, so
+regenerating it would lock the app out of its own graph.
+
+`test/snapshot.test.js` covers the import-once marker, including the cases that
+must force a re-import: a marker naming a different Neo4j home (relocated
+install) and a legacy marker with no `dataDir`.
+
+`test/electron-stub.js` is a helper, not a suite: it seeds the module cache so
+`require('electron')` yields a fake `app`, which is what lets modules reaching
+`lib/paths.js` run under plain `node --test`.
+
+`supervisor.js` and `firstrun.js` have **no** unit tests — their behaviour is
+process orchestration and multi-GB I/O. Validate them with the checklist below.
+
 ### In-place updates
 
 A new app build ships a new `assets.manifest.json` but keeps the first-run

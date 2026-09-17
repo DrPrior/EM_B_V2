@@ -19,11 +19,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >   supervisor + first-run), E (freeze spec + build/release scripts). `lib/docker.js`
 >   and `lib/compose.js` are deleted; [electron/lib/procs.js](electron/lib/procs.js) spawns Neo4j and the
 >   frozen API directly.
-> - **Remaining is artifact work, not code:** Workstream C (a **Community** Neo4j
->   plus a redistributable JRE staged for `build-release.ps1`, and a
->   Community-loadable *record/aligned* dump — the dev graph lives on
->   **Enterprise**, whose `block` store format Community refuses to load), then
->   code-signing (no UALR cert yet) and a clean-machine first-run test.
+> - **Remaining is artifact work, not code:** Workstream C — stage a **Community**
+>   Neo4j `2026.07.x` home plus a redistributable JRE for `build-release.ps1`
+>   (`-Neo4jHome` / `-JreHome`); neither exists yet. Then code-signing (no UALR
+>   cert yet) and a clean-machine first-run test.
+> - **The shipped dump is fine.** `release/neo4j.dump` is verified
+>   `record-aligned-1.1`, so Community can load it, even though dev runs
+>   Enterprise (whose `block` default it cannot). `backup-block/neo4j.dump` is the
+>   pre-migration `block-block-1.1` original. Note `neo4j-admin database load
+>   --info` reports only the *archive* format — to read the store format, load
+>   into a scratch `server.directories.data` and run `database info --from-path`.
 > - **⚠️ `dist/emb-api/emb-api.exe` cannot be run on this machine.** Defender ASR
 >   rule `01443614-CD74-433A-B99E-2ECDC07BFC25` ("block executable files unless
 >   they meet a prevalence, age, or trusted list criterion") is in Block mode
@@ -414,9 +419,16 @@ the assets from a USB `assets/` folder ([lib/assets.js](electron/lib/assets.js))
 **before** first init, loads the dump offline ([lib/snapshot.js](electron/lib/snapshot.js)), then starts
 the stack. [lib/apibundle.js](electron/lib/apibundle.js) re-unpacks the API bundle when a shipped
 manifest is newer than what's installed, so an app update can't leave the new
-shell running the old exe. Only `apibundle`, `logger` and `ollamaenv` have unit
-tests — `procs`, `supervisor`, `firstrun`, `snapshot` and `archive` are covered
-only by an end-to-end first-run test on a real machine.
+shell running the old exe.
+
+**Tests** (`cd electron; npm test`, Node's built-in runner): `apibundle`,
+`logger`, `ollamaenv`, `procs`, `archive`, `envfile`, `snapshot`. They are
+hermetic — temp dirs, stub HTTP/TCP listeners, the real OS `tar`, no Electron.
+Modules that reach `lib/paths.js` need `test/electron-stub.js` first, because
+`paths.js` does `require('electron')` at module scope and outside Electron that
+export is a path string (so `app` is `undefined`). `supervisor.js` and
+`firstrun.js` have **no** unit tests — startup ordering, crash detection, orphan
+cleanup and the multi-GB unpack are only exercised by a real first run.
 
 When launching `electron .` from a VS Code terminal, clear `ELECTRON_RUN_AS_NODE`
 first (`Remove-Item Env:ELECTRON_RUN_AS_NODE`). The extension host sets it, which

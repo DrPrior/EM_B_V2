@@ -83,20 +83,29 @@ function tcpOpen(host, port, timeoutMs = 2000) {
   });
 }
 
-/** Wait until Neo4j accepts bolt connections (readiness, not just process-alive). */
-async function waitForBolt(retries = 60, delayMs = 1000) {
+/**
+ * Wait until Neo4j accepts bolt connections (readiness, not just process-alive).
+ * `target` overrides the host/port; it exists so tests can point at a stub
+ * listener instead of the real 7687.
+ */
+async function waitForBolt(retries = 60, delayMs = 1000, target = {}) {
+  const { host = BOLT_HOST, port = BOLT_PORT } = target;
   for (let i = 0; i < retries; i++) {
-    if (await tcpOpen(BOLT_HOST, BOLT_PORT)) return true;
+    if (await tcpOpen(host, port)) return true;
     await sleep(delayMs);
   }
   return false;
 }
 
-/** Resolve true if the API answers /health with {status:"healthy"}. */
-function checkHealth(timeoutMs = 2000) {
+/**
+ * Resolve true if the API answers /health with {status:"healthy"}.
+ * `target` overrides the host/port (see waitForBolt).
+ */
+function checkHealth(timeoutMs = 2000, target = {}) {
+  const { host = API_HOST, port = API_PORT } = target;
   return new Promise((resolve) => {
     const req = http.get(
-      { host: API_HOST, port: API_PORT, path: '/health', timeout: timeoutMs },
+      { host, port, path: '/health', timeout: timeoutMs },
       (res) => {
         let body = '';
         res.on('data', (d) => (body += d));
@@ -114,9 +123,9 @@ function checkHealth(timeoutMs = 2000) {
   });
 }
 
-async function waitForHealth(retries = 90, delayMs = 2000) {
+async function waitForHealth(retries = 90, delayMs = 2000, target = {}) {
   for (let i = 0; i < retries; i++) {
-    if (await checkHealth()) return true;
+    if (await checkHealth(2000, target)) return true;
     await sleep(delayMs);
   }
   return false;

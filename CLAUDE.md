@@ -2,27 +2,41 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> ## ⚠️ Decontainerization: API done, packaging remains
+> ## ⚠️ Decontainerization: code done, release artifacts remain
 >
 > The organization (UALR) no longer permits Docker, so the app runs as **native
 > host processes** — no container runtime at all, every service on `127.0.0.1`.
 >
 > **The Docker files are gone from this repo** (`Dockerfile`, `Dockerfile.prod`,
 > `docker-compose.yml`, `docker-compose.desktop.yml` were deleted in `fdb0c6e`).
-> The Python API, the pipeline, and the dev flow are fully native today. `docker
-> compose up` / `docker exec` no longer work — if you find a doc or comment that
-> tells you to run them, it is stale.
+> The Python API, the pipeline, the dev flow, the Electron shell, and the build
+> scripts are all native today. `docker compose up` / `docker exec` no longer
+> work — if you find a doc or comment that tells you to run them, it is stale.
 >
 > - **Canonical plan + pitfalls:** [`docs/DECONTAINERIZE_PLAN.md`](docs/DECONTAINERIZE_PLAN.md) — read before migration work.
 > - **Dev runbook:** [`docs/NATIVE_DEV.md`](docs/NATIVE_DEV.md).
-> - **Remaining:** Workstream C (bundle native Neo4j + JRE), D (Electron rewrite), E (build/release pipeline).
-> - **The Electron shell is currently non-functional.** `electron/supervisor.js`
->   and `electron/lib/{docker,compose,snapshot,firstrun,assets}.js` still drive the
->   deleted Docker stack. It must be rewritten (Workstream D) before it runs again.
+> - **Landed:** A (app native-safety), B (native dev stack), D (Electron native
+>   supervisor + first-run), E (freeze spec + build/release scripts). `lib/docker.js`
+>   and `lib/compose.js` are deleted; [electron/lib/procs.js](electron/lib/procs.js) spawns Neo4j and the
+>   frozen API directly.
+> - **Remaining is artifact work, not code:** Workstream C (a **Community** Neo4j
+>   plus a redistributable JRE staged for `build-release.ps1`, and a
+>   Community-loadable *record/aligned* dump — the dev graph lives on
+>   **Enterprise**, whose `block` store format Community refuses to load), then
+>   code-signing (no UALR cert yet) and a clean-machine first-run test.
+> - **⚠️ `dist/emb-api/emb-api.exe` cannot be run on this machine.** Defender ASR
+>   rule `01443614-CD74-433A-B99E-2ECDC07BFC25` ("block executable files unless
+>   they meet a prevalence, age, or trusted list criterion") is in Block mode
+>   under UALR policy, so launching it gives a bare `Access is denied.` with no
+>   traceback and nothing in AppLocker. Confirm with `Get-WinEvent -LogName
+>   "Microsoft-Windows-Windows Defender/Operational" | Where-Object Id -eq 1121`.
+>   The freeze can be *built* and inspected here, not executed. Don't chase it as
+>   a Python or PyInstaller bug.
 > - **Do not add new Docker coupling.** No `host.docker.internal`, no compose, no
 >   `/app/...` paths in new code.
 >
-> Working branch: `Decontainerize`.
+> Working branch: `Decontainerize` — cut task branches from it and PR back into
+> it, not into `main` (`main` trails it by many commits).
 
 ## Stack
 
@@ -96,8 +110,27 @@ ruff format .
 ruff check .
 ```
 
-**Electron shell** (currently broken — see the banner): `cd electron; npm test`
-runs `node --test test/**/*.test.js`; `npm run dist:win` builds the NSIS installer.
+**Electron shell:** `cd electron; npm test` runs `node --test test/**/*.test.js`;
+`npm run dist:win` builds the NSIS installer.
+
+**Freeze the API** (one-dir bundle at `dist/emb-api/emb-api.exe` + `_internal/`):
+```powershell
+python -m PyInstaller emb-api.spec --noconfirm
+```
+Build it from the env that has the runtime deps (`pyAI`), not a bare system
+Python. [emb-api.spec](emb-api.spec) carries an `EXCLUDES` list because `python-pptx → PIL`
+optionally references IPython and Tk; without it a dev env leaks ~25 MB of
+notebook stack into the bundle.
+
+**Build the release assets** (frozen API + Neo4j + JRE + dump + corpus, then
+checksums into `electron/resources/assets.manifest.json`):
+```powershell
+pwsh -File electron/scripts/build-release.ps1 -Neo4jHome <dir> -JreHome <dir>
+cd electron; npm run dist:win          # bakes the manifest into the installer
+pwsh -File scripts/stage-usb.ps1 -Verify
+```
+Run them in that order — `stage-usb.ps1` fails if the installer carries a
+different manifest than `release/`, or if any asset's SHA-256 doesn't match.
 
 **Reset the graph** (drop all Chunk nodes before re-ingesting), in Neo4j Browser
 at `http://localhost:7474`:
@@ -368,10 +401,22 @@ Interactive API docs: `http://localhost:8000/docs`. The static UI is mounted at
 ### Desktop shell ([electron/](electron/))
 
 Electron main process + preload + a first-run wizard; supervises the backend and
-navigates to `http://127.0.0.1:8000` once `/health` is green. **Broken today** —
-`supervisor.js` and most of `lib/` still shell out to Docker/compose. Workstream D
-rewrites it to spawn native Neo4j and the frozen API directly. Tests use Node's
-built-in runner (`node --test`).
+navigates to `http://127.0.0.1:8000` once `/health` is green. Fully native:
+[supervisor.js](electron/supervisor.js) drives [lib/procs.js](electron/lib/procs.js), which spawns bundled Neo4j
+(`neo4j console`, `JAVA_HOME` = the bundled JRE) and the frozen `emb-api.exe`,
+probes bolt then `/health`, and kills both process trees on quit. Tests use
+Node's built-in runner (`node --test`).
+
+First run ([lib/firstrun.js](electron/lib/firstrun.js), step ids mirrored in [wizard/wizard.js](electron/wizard/wizard.js)):
+`gpu → ollama → models → neo4j → runtime → data → snapshot → start`. It unpacks
+the assets from a USB `assets/` folder ([lib/assets.js](electron/lib/assets.js)) into
+`<userData>/{neo4j,jre,api,project_data,snapshot}`, sets the Neo4j password
+**before** first init, loads the dump offline ([lib/snapshot.js](electron/lib/snapshot.js)), then starts
+the stack. [lib/apibundle.js](electron/lib/apibundle.js) re-unpacks the API bundle when a shipped
+manifest is newer than what's installed, so an app update can't leave the new
+shell running the old exe. Only `apibundle`, `logger` and `ollamaenv` have unit
+tests — `procs`, `supervisor`, `firstrun`, `snapshot` and `archive` are covered
+only by an end-to-end first-run test on a real machine.
 
 When launching `electron .` from a VS Code terminal, clear `ELECTRON_RUN_AS_NODE`
 first (`Remove-Item Env:ELECTRON_RUN_AS_NODE`). The extension host sets it, which

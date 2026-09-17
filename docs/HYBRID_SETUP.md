@@ -1,51 +1,21 @@
-# Hybrid Setup — Host-Native Ollama
+# Host-native Ollama — setup, GPU verification, graph sharing
 
-> ## ⚠️ Decontainerization in progress
+> **The "hybrid" architecture this file used to describe is gone.** Neo4j and the
+> API no longer run in Docker; every service is a native process on `127.0.0.1`.
+> See [`DECONTAINERIZE_PLAN.md`](DECONTAINERIZE_PLAN.md) for the architecture and
+> [`NATIVE_DEV.md`](NATIVE_DEV.md) for the dev runbook (installing native Neo4j,
+> `.env`, `scripts/dev-up.ps1`).
 >
-> **Docker is being removed.** The "hybrid" split described below (Neo4j + API in
-> Docker, Ollama native) is becoming **all-native** — see
-> [`DECONTAINERIZE_PLAN.md`](DECONTAINERIZE_PLAN.md). Once migrated:
-> - The API runs native and reaches Ollama over `http://localhost:11434` —
->   **`OLLAMA_HOST=0.0.0.0` is no longer needed** and the entire "Hardening for
->   untrusted networks" section below becomes moot (Ollama binds `127.0.0.1` only).
-> - Neo4j runs native (bundled JRE); `docker compose up` is replaced by native
->   process startup. The `neo4j:2026.04.0` store-format pin still applies to the
->   dump.
->
-> **No refactor code has landed yet** — the Docker instructions below still work
-> today. The Ollama **install** steps (section 1) stay valid either way; the
-> env-var section's `OLLAMA_HOST=0.0.0.0` is a Docker-only requirement that goes
-> away natively.
+> What remains here is the part that was never containerized: **Ollama on the
+> host**, plus GPU verification, graph sharing, and the startup tuning knobs.
 
-This app currently runs in a **hybrid** architecture: **Neo4j** and the **Python
-API** run in Docker, while **Ollama runs natively on the host machine** so it can
-use the host GPU directly (Apple **Metal**, NVIDIA **CUDA**, or Intel Arc
-**Vulkan**) without the performance loss of GPU passthrough into a Linux
-container. (The decontainerization moves Neo4j and the API native too — see the
-banner above.)
+Ollama runs natively so it can use the host GPU directly (Apple **Metal**, NVIDIA
+**CUDA**, or Intel Arc **Vulkan**) with no passthrough loss. Because the API is
+now native too, it reaches Ollama over plain `http://localhost:11434` — **Ollama
+keeps its default loopback bind**; nothing needs to be exposed.
 
-The API container reaches the host's Ollama at `http://host.docker.internal:11434`
-and **provisions its models automatically on startup** — you do **not** need to
-pull models or build the custom variants by hand. You only need to install
-Ollama and configure it to accept traffic from the container. (Native: the API
-reaches Ollama at `http://localhost:11434`.)
-
-> 📦 **Two ways to run this stack.** For **end users**, the whole thing is now
-> packaged as a one-click **desktop app** (Electron shell in [`electron/`](../electron/))
-> that ships on a **USB drive** and runs a guided first-run wizard: it installs
-> Docker Desktop and Ollama if missing, **persists the required host env vars for
-> you** (`OLLAMA_HOST=0.0.0.0` etc. — including a macOS login agent so they
-> survive a reboot; see [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js)),
-> pulls/builds the models, loads the prebuilt API image and graph snapshot, then
-> supervises the Docker stack — no command line, no manual env-var editing. See
-> [`electron/README.md`](../electron/README.md).
-> That path uses [`docker-compose.desktop.yml`](../docker-compose.desktop.yml)
-> (prebuilt [`Dockerfile.prod`](../Dockerfile.prod) image, no source mount).
->
-> **This document covers the manual / developer path** (`docker-compose.yml`,
-> hot-reload source mounts) — for building the stack yourself, running the
-> pipeline, or developing the backend. Ollama runs host-native and needs the same
-> one-time setup below either way.
+The API **provisions its models automatically on startup** — you do not need to
+pull models or build the custom variants by hand.
 
 ---
 
@@ -59,66 +29,60 @@ reaches Ollama at `http://localhost:11434`.)
   <https://ollama.com/download>. NVIDIA uses CUDA automatically; modern Intel Arc
   GPUs are used via Vulkan.
 
-### 2. Set the required host environment variables
+### 2. Set the recommended host environment variables
 
 > 🖥️ **Desktop-app users can skip this section.** The wizard sets and persists
 > these variables automatically (plus `OLLAMA_IGPU_ENABLE=1` on Intel-integrated-
-> GPU hosts — see the table below; on macOS it also installs a login agent so
-> they survive a reboot) and restarts Ollama to apply them —
-> [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js). The steps below are
-> for the **manual / developer path**.
+> GPU hosts; on macOS it also installs a login agent so they survive a reboot) and
+> restarts Ollama to apply them — [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js).
+> It also **removes** a stale user-scope `OLLAMA_HOST=0.0.0.0` left behind by a
+> Docker-era build. The steps below are for the **manual / developer path**.
 
-These let the container talk to Ollama, keep both models resident in memory, and
-tune inference throughput. The first three are connectivity/warmth; the next
-three (`OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`, `OLLAMA_NUM_PARALLEL`)
-are backend-agnostic performance settings that help NVIDIA, Metal, and Intel
-hosts alike — see [the Performance explainer](explainer/gpu-performance.html) for
-the measurements behind them.
+These keep both models resident in memory and tune inference throughput. They are
+backend-agnostic — they help NVIDIA, Metal, and Intel hosts alike. See
+[the Performance explainer](explainer/gpu-performance.html) for the measurements
+behind them.
 
 | Variable | Value | Why |
 |---|---|---|
-| `OLLAMA_HOST` | `0.0.0.0` | Native Ollama listens only on `127.0.0.1` by default and **rejects** calls from the Docker bridge. Binding `0.0.0.0` lets the container reach it. |
 | `OLLAMA_KEEP_ALIVE` | `-1` | Keep models loaded indefinitely so there is no reload lag between the embedding and chat steps of each query. |
-| `OLLAMA_MAX_LOADED_MODELS` | `2` | Keep the 12B chat model and 4B embedding model co-resident; prevents Ollama from unloading one to make room for the other ("model thrashing"). |
-| `OLLAMA_FLASH_ATTENTION` | `1` | Fused attention over the KV cache. Cuts the time to process a large retrieval prompt **and** the per-token slowdown a long context causes — the two costs that dominate query latency. Backend-agnostic: CUDA/Metal support it fully; on a Vulkan build without it, it is silently ignored (safe to set anywhere). |
+| `OLLAMA_MAX_LOADED_MODELS` | `2` | Keep the 12B chat model and the embedding model co-resident; prevents Ollama from unloading one to make room for the other ("model thrashing"). |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Fused attention over the KV cache. Cuts the time to process a large retrieval prompt **and** the per-token slowdown a long context causes — the two costs that dominate query latency. CUDA/Metal support it fully; on a Vulkan build without it, it is silently ignored (safe to set anywhere). |
 | `OLLAMA_KV_CACHE_TYPE` | `q8_0` | Store the KV cache at 8-bit, roughly halving its memory (requires `OLLAMA_FLASH_ATTENTION=1`). Frees headroom on a shared-VRAM iGPU so the two co-resident models aren't squeezed; negligible quality impact. |
-| `OLLAMA_NUM_PARALLEL` | `1` | One inference slot instead of an auto-chosen 2–4. Each slot reserves its own KV cache; on a shared-VRAM host that reservation is what evicts a co-resident model and causes 17–25 s mid-session reload spikes. A single-user app never needs more than one slot. |
-| `OLLAMA_IGPU_ENABLE` | `1` | **Intel integrated GPUs only** (Arc iGPU such as the Lunar Lake **Arc 140V**, or Iris Xe). Ollama enumerates the iGPU via Vulkan but then *drops* it by default (`server.log`: `dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1`) and silently falls back to CPU. This flips offload back on. **Do not set it on NVIDIA or Apple hosts** — it only affects integrated GPUs, so CUDA/Metal machines don't need it and the desktop wizard doesn't set it there. Pair with `OLLAMA_VULKAN=1` if your Ollama build doesn't enable Vulkan by default. |
+| `OLLAMA_NUM_PARALLEL` | `1` | One inference slot instead of an auto-chosen 2–4. Each slot reserves its own KV cache; on a shared-VRAM host that reservation is what evicts a co-resident model and causes 17–25 s mid-session reload spikes. A single-user app never needs more than one slot. **Raise it only if you want parallel enrichment** (`enrichment_concurrency` in `pipeline/enrich.py` fans out LLM calls, which needs the slots and the VRAM for their KV caches). |
+| `OLLAMA_IGPU_ENABLE` | `1` | **Intel integrated GPUs only** (Arc iGPU such as the Lunar Lake **Arc 140V**, or Iris Xe). Ollama enumerates the iGPU via Vulkan but then *drops* it by default (`server.log`: `dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1`) and silently falls back to CPU. This flips offload back on. **Do not set it on NVIDIA or Apple hosts.** Pair with `OLLAMA_VULKAN=1` if your Ollama build doesn't enable Vulkan by default. |
 
-> ⚠️ **Security note:** `OLLAMA_HOST=0.0.0.0` exposes the **unauthenticated**
-> Ollama API on **all network interfaces**, not just localhost — anyone who can
-> reach this machine on port `11434` can use it. This is fine on a trusted dev
-> machine behind a firewall, but **not** on a laptop that roams onto untrusted
-> Wi-Fi. Before using such a laptop off your trusted network, lock the port down
-> — see [Hardening for untrusted networks](#hardening-for-untrusted-networks-laptops)
-> below (a one-command script is provided).
+> ⚠️ **Do not set `OLLAMA_HOST=0.0.0.0`.** It was required only because the API
+> ran in a container and reached Ollama across the Docker bridge. Setting it now
+> puts Ollama's **unauthenticated** API on every network interface for no benefit.
+> If a previous setup persisted it, remove it (see *Reverting the Docker-era
+> network exposure* below).
 
 > ℹ️ **Persistence:** Ollama re-reads these variables **every time the daemon
 > starts**, so what matters is whether they're stored persistently in the OS. Set
-> them with the methods below (not with a per-shell `$env:` / `export`, which
-> only lasts for that session). The *models* themselves are never persistent —
-> after an Ollama restart or reboot, VRAM starts empty and models reload on the
-> first query, then stay resident because `OLLAMA_KEEP_ALIVE=-1` is still in
-> effect.
+> them with the methods below (not with a per-shell `$env:` / `export`, which only
+> lasts for that session). The *models* themselves are never persistent — after an
+> Ollama restart or reboot, VRAM starts empty and models reload on the first query,
+> then stay resident because `OLLAMA_KEEP_ALIVE=-1` is still in effect.
 
 **Windows (persists permanently):**
+
 1. Search the Start Menu for **"Edit the system environment variables"**.
-2. Add the **System variables** from the table above (or use `setx OLLAMA_HOST 0.0.0.0`, etc.).
+2. Add the variables from the table above (or use `setx OLLAMA_KEEP_ALIVE -1`, etc.).
 3. Quit Ollama from the system tray and relaunch it.
 
-Set once — every future restart and reboot picks them up automatically. (Do
-**not** use `$env:OLLAMA_HOST="0.0.0.0"` in a PowerShell session; that is
-session-only and won't survive.)
+Set once — every future restart and reboot picks them up automatically.
 
 **macOS:**
+
 ```bash
-launchctl setenv OLLAMA_HOST "0.0.0.0"
 launchctl setenv OLLAMA_KEEP_ALIVE "-1"
 launchctl setenv OLLAMA_MAX_LOADED_MODELS "2"
 launchctl setenv OLLAMA_FLASH_ATTENTION "1"
 launchctl setenv OLLAMA_KV_CACHE_TYPE "q8_0"
 launchctl setenv OLLAMA_NUM_PARALLEL "1"
 ```
+
 Then fully quit and relaunch the Ollama app.
 
 > ⚠️ **macOS gotcha (manual path only):** `launchctl setenv` survives an Ollama
@@ -127,6 +91,7 @@ Then fully quit and relaunch the Ollama app.
 > app does exactly this automatically — see
 > [`electron/lib/ollamaenv.js`](../electron/lib/ollamaenv.js).) Create
 > `~/Library/LaunchAgents/com.ollama.env.plist`:
+>
 > ```xml
 > <?xml version="1.0" encoding="UTF-8"?>
 > <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -137,12 +102,13 @@ Then fully quit and relaunch the Ollama app.
 >   <key>ProgramArguments</key>
 >   <array>
 >     <string>sh</string><string>-c</string>
->     <string>launchctl setenv OLLAMA_HOST 0.0.0.0; launchctl setenv OLLAMA_KEEP_ALIVE -1; launchctl setenv OLLAMA_MAX_LOADED_MODELS 2; launchctl setenv OLLAMA_FLASH_ATTENTION 1; launchctl setenv OLLAMA_KV_CACHE_TYPE q8_0; launchctl setenv OLLAMA_NUM_PARALLEL 1</string>
+>     <string>launchctl setenv OLLAMA_KEEP_ALIVE -1; launchctl setenv OLLAMA_MAX_LOADED_MODELS 2; launchctl setenv OLLAMA_FLASH_ATTENTION 1; launchctl setenv OLLAMA_KV_CACHE_TYPE q8_0; launchctl setenv OLLAMA_NUM_PARALLEL 1</string>
 >   </array>
 >   <key>RunAtLoad</key><true/>
 > </dict>
 > </plist>
 > ```
+>
 > Then `launchctl load ~/Library/LaunchAgents/com.ollama.env.plist` (it also runs
 > automatically at each login). Relaunch the Ollama app afterward.
 
@@ -151,34 +117,27 @@ Then fully quit and relaunch the Ollama app.
 ```bash
 curl http://localhost:11434/api/version
 ```
-You should get a JSON version string. If it hangs or refuses, Ollama isn't
-running or `OLLAMA_HOST` isn't set.
+
+You should get a JSON version string. If it hangs or refuses, Ollama isn't running.
 
 ---
 
 ## Start the stack
 
-```bash
-docker compose up -d --build
-```
+See [`NATIVE_DEV.md`](NATIVE_DEV.md) — in short: start native Neo4j, then
+`scripts/dev-up.ps1`. On startup the API will:
 
-On startup the API will:
-
-1. Wait for the host Ollama daemon (retries `ollama_startup_retries` times; if
-   it never answers, the container **exits** with a clear message — start Ollama
-   and bring the stack back up).
+1. Wait for the host Ollama daemon (retries `ollama_startup_retries` times; if it
+   never answers the API **exits** with a clear message — start Ollama and bring
+   it back up).
 2. Pull the base models (`gemma4:12b-it-qat`, `embeddinggemma:latest`) if missing —
    the first run downloads ~10 GB, so be patient.
 3. Build the custom `chat-model` / `embedding-model` variants from
    [`Modelfile`](../Modelfile) and [`Modelfile.embeddings`](../Modelfile.embeddings)
    if missing.
 
-Watch progress:
-```bash
-docker logs -f em_b_v2-api-1
-```
-
 Confirm the variants landed on the host:
+
 ```bash
 ollama list   # should list chat-model and embedding-model
 ```
@@ -186,8 +145,9 @@ ollama list   # should list chat-model and embedding-model
 ### Re-provisioning without a restart
 
 If you change a Modelfile or need to rebuild a variant, re-run the bootstrap
-without restarting the container:
-```bash
+without restarting the API:
+
+```powershell
 curl.exe -s -X POST http://localhost:8000/admin/bootstrap-models
 ```
 
@@ -203,8 +163,7 @@ Ollama loaded the models into GPU VRAM on the Arc machine instead of silently
 falling back to CPU. (Intel's **SDE** emulates *CPU* instruction sets, not GPUs,
 and does not apply here.)
 
-Run the bundled check **on the machine with the Arc GPU**, with the stack's
-Ollama running:
+Run the bundled check **on the machine with the Arc GPU**, with Ollama running:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\verify-arc-gpu.ps1
@@ -231,194 +190,90 @@ reports tok/s, then reads `/api/ps` (`size` vs `size_vram`) and prints a verdict
 Pass `-Model`, `-OllamaHost`, or `-LogPath` to override the defaults (do **not**
 pass `embedding-model` to `-Model` — it has no `/api/generate` endpoint).
 
+> Task Manager's default GPU view reads **0%** during CUDA inference because it
+> shows the *3D* engine. Trust `ollama ps` / `size_vram` and the tok/s figure
+> instead.
+
 ---
 
 ## Sharing the graph database
 
-The populated graph lives in a **named Docker volume** (`em_b_v2_neo4j_data`)
-that is **not** part of the repo. If you just share the code, a coworker gets an
-**empty** database and would have to re-run the entire
-`ingest → load_manifest → enrich` pipeline — which needs all the source
-documents *and* burns a lot of host LLM time. To skip that, ship them a
-**snapshot** of the graph alongside the code.
+The populated graph lives in the **native Neo4j data directory**, which is not
+part of the repo. If you just share the code, a coworker gets an **empty**
+database and would have to re-run the entire `ingest → load_manifest → enrich`
+pipeline — which needs all the source documents *and* burns a lot of host LLM
+time. To skip that, ship them a **snapshot** of the graph.
 
-Two things to keep in mind:
+Three things to keep in mind:
 
-- **The Neo4j version is pinned** (`image: neo4j:2026.04.0` in
-  [`docker-compose.yml`](../docker-compose.yml)) precisely so a snapshot exported
-  on one machine is guaranteed to load on another — the store format must match.
-  If you bump that version, re-export any shared snapshot.
+- **A dump only loads into the same Neo4j major line it came from.** The current
+  graph is on the `2026.07.x` line. If you move lines, re-export.
+- **Community cannot load an Enterprise `block` dump.** Enterprise (what Neo4j
+  Desktop installs) defaults to `block`; a dump destined for a Community server —
+  including the one the desktop app ships — must be a **record** format
+  (aligned/standard). See [`DECONTAINERIZE_PLAN.md`](DECONTAINERIZE_PLAN.md).
 - **Sharing the graph does not remove the Ollama dependency.** The coworker still
   needs host-native Ollama running to *query* (embedding the question, entity
   extraction, chat). The snapshot only saves them the rebuild.
 
+Both scripts drive the host's `neo4j-admin` directly and **do not manage the
+server lifecycle** — stop the database yourself first. They refuse to run while
+bolt (`127.0.0.1:7687`) is still open.
+
 ### You — export
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\export-graph.ps1
+pwsh -File scripts/export-graph.ps1 `
+  -Neo4jAdmin "$env:USERPROFILE\.Neo4jDesktop2\Data\dbmss\dbms-<id>\bin\neo4j-admin.bat" `
+  -JavaHome  "$env:USERPROFILE\.Neo4jDesktop2\Cache\runtime\zulu21..."
 ```
 
-This stops Neo4j (the offline dump format requires it), writes
-`snapshot/neo4j.dump`, and restarts Neo4j. The dump carries **all nodes,
-embeddings, and the `chunk_vector_idx` vector-index config** — nothing needs
-rebuilding on the other end.
+This writes `snapshot/neo4j.dump`, carrying **all nodes, embeddings, and the
+`chunk_vector_idx` vector-index config** — nothing needs rebuilding on the other
+end. Start Neo4j again afterward.
 
 `snapshot/` is **gitignored** because a dump with embeddings is large (tens–
-hundreds of MB). Don't commit it directly — share it via **Git LFS** or send the
-`.dump` out-of-band (email/drive/USB).
+hundreds of MB). Don't commit it; share it via **Git LFS** or send the `.dump`
+out-of-band (drive/USB).
 
 ### Coworker — import
 
 After cloning the repo, drop the shared `neo4j.dump` into a `snapshot/` folder at
-the repo root, then — **before** the first `docker compose up`:
+the repo root, stop Neo4j, then:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\import-graph.ps1 -Up
+pwsh -File scripts/import-graph.ps1 `
+  -Neo4jAdmin "<...>\bin\neo4j-admin.bat" -JavaHome "<...jre...>"
 ```
 
-This loads the dump into the local volume (**overwriting** any existing local
-graph) and brings the stack up. Omit `-Up` to load only and start the stack
-yourself later. Host-native Ollama must be installed and running (see the
+This **replaces** the local database (`--overwrite-destination=true`), so any
+existing local graph is discarded. Start Neo4j again afterward; the vector index
+rebuilds on startup. Host-native Ollama must be installed and running (see the
 one-time setup above) for chat to work.
 
 ---
 
-## Hardening for untrusted networks (laptops)
+## Reverting the Docker-era network exposure
 
-`OLLAMA_HOST=0.0.0.0` is required so the API **container** can reach Ollama, but
-it also puts Ollama's **unauthenticated** API on every network interface. Ollama
-has no built-in auth and `OLLAMA_ORIGINS` is only CORS (not a network ACL), so
-on a laptop that roams onto untrusted Wi-Fi, anyone on that network who can reach
-`your-laptop:11434` can run your models, read/inject prompts, or exhaust the GPU.
+Earlier versions of this stack required `OLLAMA_HOST=0.0.0.0` so the API
+*container* could reach Ollama across the Docker bridge, which exposed Ollama's
+unauthenticated API on every interface — and a firewall-hardening procedure to
+contain it. **Both are retired**: the native API uses loopback, so Ollama binds
+`127.0.0.1` only and there is nothing to harden.
 
-The fix is at the **network layer**: keep Ollama on `0.0.0.0` for the OS, but let
-the firewall admit port `11434` **only from the Docker subnet** and block it from
-the physical LAN.
+If you ran the old setup on this machine, undo it:
 
-### Audit first — you may already be safe
+1. **Remove the env var** if it is still persisted:
+   `[Environment]::SetEnvironmentVariable("OLLAMA_HOST", $null, "User")` on
+   Windows (or `launchctl unsetenv OLLAMA_HOST` on macOS), then restart Ollama.
+   The desktop wizard does this for you on launch.
+2. **Revert the firewall rules** — they are scoped to a Docker subnet that no
+   longer exists: `pwsh -File scripts/harden-ollama-firewall.ps1 -Revert`.
+3. Confirm Ollama is loopback-only: `curl http://127.0.0.1:11434/api/version`
+   succeeds, and the same request to the machine's LAN address does not.
 
-Windows Firewall blocks unsolicited inbound by **default**, so on many machines
-port `11434` is *already* closed to the network and **no change is needed**. The
-exposure only exists if something (often the Ollama/Docker installer, or a user
-clicking "Allow" on a firewall prompt) added an inbound **Allow** rule. So always
-check before you change anything.
-
-In an **elevated** PowerShell:
-
-```powershell
-# A. Any Allow rule scoped to the port?
-powershell -ExecutionPolicy Bypass -File .\scripts\harden-ollama-firewall.ps1 -Audit
-
-# B. Any Allow rule scoped to the ollama.exe *program* (port = Any)?
-Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True |
-  Where-Object { $_.DisplayName -match 'ollama' -or
-    (($_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue).Program -match 'ollama') } |
-  Select-Object DisplayName,
-    @{n='Program';e={($_ | Get-NetFirewallApplicationFilter).Program}},
-    @{n='LocalPort';e={($_ | Get-NetFirewallPortFilter).LocalPort}},
-    @{n='RemoteScope';e={($_ | Get-NetFirewallAddressFilter).RemoteAddress -join ','}}
-
-# C. Is the firewall on and defaulting to block?
-Get-NetFirewallProfile | Select-Object Name, Enabled, DefaultInboundAction
-```
-
-Read the results:
-
-- **B returns nothing**, **A shows no rule**, and **C** shows every profile
-  `Enabled = True` with `DefaultInboundAction = Block` *or* `NotConfigured`
-  (NotConfigured resolves to **Block** — the Windows default) → **the port is
-  already closed to the LAN. You are done; do not apply the script** (adding a
-  rule where the default already blocks gains nothing).
-- **A or B shows an Allow rule** (especially `RemoteScope = Any`) → that is the
-  exposure. Narrow it with the automated step below.
-
-> The definitive test, since rule analysis can miss edge cases: from **another
-> device on the same network**, run `curl http://<this-laptop-ip>:11434/api/version`.
-> Timeout / connection-refused = safe; a JSON version string = exposed. (Testing
-> from the laptop itself gives a false "exposed" — a host can always reach its
-> own services.)
-
-> Re-audit after Ollama updates: an update can re-trigger the "Allow this app
-> through the firewall?" prompt, and clicking **Allow** re-opens the port.
-
-### Windows — automated (recommended, only if the audit found an Allow rule)
-
-Run the bundled script in an **elevated** PowerShell. Start the stack first and
-send one chat so it can detect the exact Docker subnet, then:
-
-```powershell
-# inspect current exposure, change nothing
-powershell -ExecutionPolicy Bypass -File .\scripts\harden-ollama-firewall.ps1 -Audit
-
-# apply: disable broad Allow rules, add one scoped to the Docker subnet
-powershell -ExecutionPolicy Bypass -File .\scripts\harden-ollama-firewall.ps1
-
-# undo everything it changed
-powershell -ExecutionPolicy Bypass -File .\scripts\harden-ollama-firewall.ps1 -Revert
-```
-
-The script auto-detects the Docker/WSL subnet(s) (e.g. `172.x.x.0/24`), falls
-back to the well-known Docker Desktop ranges if the stack isn't connected, and
-records its changes so `-Revert` is clean. Pass `-DockerSubnet "172.20.192.0/24"`
-to force a specific range if detection is wrong.
-
-### Windows — manual equivalent
-
-```powershell
-# 1. Find the broad Allow rule(s) for 11434 and disable any with scope = Any
-Get-NetFirewallPortFilter -Protocol TCP | Where-Object { "$($_.LocalPort)" -eq "11434" } |
-  Get-NetFirewallRule | Where-Object Direction -eq 'Inbound' |
-  Select-Object DisplayName, Action, Enabled
-
-# 2. Add ONE allow scoped to your Docker subnet; the default-block covers the LAN
-New-NetFirewallRule -DisplayName "Ollama - Docker only" -Direction Inbound `
-  -Protocol TCP -LocalPort 11434 -RemoteAddress 172.20.192.0/24 -Action Allow
-```
-
-### macOS — `pf` recipe
-
-The built-in Application Firewall is too blunt (blocking "incoming to ollama" can
-also kill the container path). Use `pf` to allow `11434` only on the Docker
-bridge interface and block it elsewhere. Add to `/etc/pf.anchors/ollama`:
-
-```
-# Allow Docker Desktop's bridge to reach Ollama; block the physical NICs.
-pass in quick on bridge100 proto tcp to any port 11434
-block in quick proto tcp to any port 11434
-```
-
-Load it with `sudo pfctl -a ollama -f /etc/pf.anchors/ollama` (the bridge
-interface name may differ — check `ifconfig` for the `vmenet`/`bridge` Docker
-uses). Persist via an `/etc/pf.conf` anchor reference.
-
-### Verify both halves
-
-1. **App still works** — send a chat through the running stack (the container
-   path must still reach Ollama).
-2. **LAN is closed** — from **another device on the same network**:
-   ```bash
-   curl http://<this-laptop-ip>:11434/api/version   # must time out / be refused
-   ```
-
-If step 1 breaks, the allowed subnet is too tight — re-run the script with the
-stack up, or pass the correct `-DockerSubnet`.
-
-### Stronger options
-
-- **Loopback + bridge:** keep Ollama on `127.0.0.1` (never on the LAN) and run a
-  small port-forward that listens only on the Docker adapter (`netsh interface
-  portproxy` on Windows, `socat` on macOS). More moving parts (the adapter IP can
-  change), but Ollama is never LAN-exposed at all.
-- **Run the API natively (the real long-term fix):** the `0.0.0.0` requirement
-  exists *only because the API runs in Docker* and reaches Ollama across the
-  Docker bridge. If the Python API ran natively on the laptop it would talk to
-  Ollama over `127.0.0.1:11434` and this exposure would disappear entirely (Neo4j
-  could stay in Docker — the app reaches it, not the reverse). **Note:** the
-  [desktop app](../electron/README.md) does **not** do this — it *supervises* the
-  same Docker stack (the API still runs in the container and still reaches Ollama
-  over `host.docker.internal`), so it still needs `OLLAMA_HOST=0.0.0.0` and the
-  firewall hardening above. Moving the API out of Docker remains unbuilt; for a
-  fleet of roaming, non-technical-user laptops it is still the preferred fix.
+`scripts/harden-ollama-firewall.ps1` is kept **only** for that `-Revert` path and
+should not be used to apply new rules.
 
 ---
 

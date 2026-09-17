@@ -8,9 +8,10 @@ Neo4j (native, bolt 127.0.0.1:7687)  +  Ollama (native, 127.0.0.1:11434)  +  API
 ```
 
 > **Status:** the app code is native-safe (paths normalized, endpoints on
-> localhost). What is *not* yet automated: installing native Neo4j (below is a
-> manual runbook) and packaging the API (that's Workstream C/D). This is the
-> developer path; end-user desktop packaging comes later.
+> localhost), and so are the Electron shell and the build scripts. What is *not*
+> automated: installing native Neo4j for dev (below is a manual runbook). This is
+> the developer path; for end-user packaging see
+> [`DECONTAINERIZE_PLAN.md`](DECONTAINERIZE_PLAN.md).
 
 ## 1. Python environment
 
@@ -23,22 +24,29 @@ python -m pip install -r requirements-dev.txt
 
 ## 2. Ollama (host-native)
 
-Already covered by [`HYBRID_SETUP.md`](HYBRID_SETUP.md) §1. **Difference for
-native:** you do **not** need `OLLAMA_HOST=0.0.0.0` — the API now talks to Ollama
-over `127.0.0.1`, so Ollama can stay on its default loopback bind. Keep the
-warmth/perf vars (`OLLAMA_KEEP_ALIVE=-1`, `OLLAMA_MAX_LOADED_MODELS=2`, etc.).
-The API builds the `chat-model` / `embedding-model` variants on startup.
+Install it and set the warmth/perf vars per
+[`HYBRID_SETUP.md`](HYBRID_SETUP.md) §1–2 (`OLLAMA_KEEP_ALIVE=-1`,
+`OLLAMA_MAX_LOADED_MODELS=2`, etc.). Do **not** set `OLLAMA_HOST=0.0.0.0` — the
+API talks to Ollama over `127.0.0.1`, so Ollama stays on its default loopback
+bind; that variable was a container-era requirement. The API builds the
+`chat-model` / `embedding-model` variants on startup.
 
 ## 3. Neo4j (native)
 
-Install a native Neo4j server. **Recommended: Neo4j Community 2026.04.0** — the
-same line the shipped `neo4j.dump` was exported from, so a native install can
-load that dump later without a store-format mismatch (the version lock in
-`DECONTAINERIZE_PLAN.md` §C). Neo4j needs a **JRE (17/21)**; either use a
-distribution that bundles one or install Java separately.
+Install a native Neo4j server on the **`2026.07.x`** line — the line the current
+graph and `neo4j.dump` live on, so a native install can load that dump without a
+store-format mismatch (the version lock in `DECONTAINERIZE_PLAN.md` §C). Neo4j
+needs a **JRE (17/21)**; either use a distribution that bundles one or install
+Java separately.
 
-Options: the Community **tarball/zip** (unpack, no admin — closest to what the
-desktop app will bundle) or **Neo4j Desktop** (GUI, easier for dev).
+Options: the Community **zip** (unpack, no admin — closest to what the desktop
+app bundles) or **Neo4j Desktop** (GUI, easier for dev).
+
+> ⚠️ **Community vs Enterprise matters for dumps.** Neo4j Desktop installs
+> **Enterprise**, which defaults to the `block` store format. A dump taken from it
+> **cannot be loaded by Community**, which is what the desktop app ships. Dev on
+> Desktop is fine, but any dump you intend to ship must be re-exported in a record
+> (aligned/standard) format.
 
 Set the password to match `NEO4J_AUTH` in your `.env` **before first start**
 (Neo4j bakes the password into its data dir on first init):

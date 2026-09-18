@@ -207,7 +207,7 @@ time. To skip that, ship them a **snapshot** of the graph.
 Three things to keep in mind:
 
 - **A dump only loads into the same Neo4j major line it came from.** The current
-  graph is on the `2026.07.x` line. If you move lines, re-export.
+  graph is on the `2026.08.x` line (the shipped server is Community 2026.08.1). If you move lines, re-export with `scripts/stage-neo4j.ps1 -Dump … -ReExport`.
 - **Community cannot load an Enterprise `block` dump.** Enterprise (what Neo4j
   Desktop installs) defaults to `block`; a dump destined for a Community server —
   including the one the desktop app ships — must be a **record** format

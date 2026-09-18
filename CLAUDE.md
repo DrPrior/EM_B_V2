@@ -122,6 +122,16 @@ Python. [emb-api.spec](emb-api.spec) carries an `EXCLUDES` list because `python-
 optionally references IPython and Tk; without it a dev env leaks ~25 MB of
 notebook stack into the bundle.
 
+**Stage the Neo4j + JRE homes** that `build-release.ps1` consumes (unpack,
+configure for loopback, optionally set the password and load the graph dump):
+```powershell
+pwsh -File scripts/stage-neo4j.ps1 -Zip <neo4j-community-*.zip> -JreZip <jre.zip> `
+     -Password <pw> -Dump .\release\neo4j.dump
+```
+Neo4j Community downloads live at `https://dist.neo4j.org/neo4j-community-<version>-windows.zip`
+(plus `.sha256`). The Deployment Center UI lists **only the newest release**, so
+fetch older lines by direct URL rather than assuming they're gone.
+
 **Build the release assets** (frozen API + Neo4j + JRE + dump + corpus, then
 checksums into `electron/resources/assets.manifest.json`):
 ```powershell

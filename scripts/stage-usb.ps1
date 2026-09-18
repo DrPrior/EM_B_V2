@@ -83,6 +83,79 @@ function Get-Sha256([string]$Path) {
     (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLower()
 }
 
+<#
+    Explain a repo-vs-installer manifest mismatch: which entries differ, and
+    which fix applies.
+
+    The fix depends on which manifest is RIGHT, and the only reliable referee is
+    the files in release\ themselves. Timestamps mislead: `git restore` gives a
+    discarded manifest a fresh mtime too, which would look exactly like "the
+    assets were rebuilt after the installer" and send you to the wrong fix.
+
+    Only runs on the failure path, so hashing ~800 MB of assets here costs
+    nothing on a successful staging.
+#>
+function Get-ManifestMismatchMessage([string]$RepoPath, [string]$BundledPath, [string]$ReleaseDir) {
+    $keys = @("apiBundle", "neo4j", "jre", "snapshot", "projectData")
+    $head = "The installer was built against a DIFFERENT assets manifest than the one in the repo."
+    try {
+        $repo = Get-Content $RepoPath -Raw | ConvertFrom-Json
+        $bund = Get-Content $BundledPath -Raw | ConvertFrom-Json
+    } catch {
+        return ("$head One of them could not be parsed ($($_.Exception.Message)).`n" +
+                "Fix: rebuild in order, each once: build-release.ps1, then cd electron; npm run dist:win")
+    }
+
+    $changed = @()
+    if ($repo.version -ne $bund.version) { $changed += "version (installer $($bund.version), repo $($repo.version))" }
+    foreach ($k in $keys) {
+        if ($repo.$k.file -ne $bund.$k.file -or $repo.$k.sha256 -ne $bund.$k.sha256) {
+            $changed += "$k ($($repo.$k.file))"
+        }
+    }
+
+    Write-Host "    Manifests differ - checking which one matches release\ ..." -ForegroundColor DarkGray
+    $hashes = @{}
+    $stale = {
+        param($m)
+        $bad = @()
+        foreach ($k in $keys) {
+            $p = Join-Path $ReleaseDir $m.$k.file
+            if (-not (Test-Path $p)) { $bad += $k; continue }
+            if (-not $hashes.ContainsKey($p)) { $hashes[$p] = Get-Sha256 $p }
+            if ($hashes[$p] -ne $m.$k.sha256) { $bad += $k }
+        }
+        $bad   # unrolled on purpose; the @(...) at the call site re-collects it
+    }
+    $repoBad = @(& $stale $repo)
+    $bundBad = @(& $stale $bund)
+
+    $lines = @($head)
+    if ($changed) { $lines += "  Differs: " + ($changed -join ", ") }
+
+    if ($repoBad.Count -eq 0 -and $bundBad.Count -eq 0) {
+        $lines += "Cause: both describe the files in release\; they differ only in version or formatting."
+        $lines += "Fix: rebuild the installer so it carries the repo's copy:  cd electron; npm run dist:win"
+    } elseif ($repoBad.Count -eq 0) {
+        $lines += "Cause: the assets in release\ were rebuilt AFTER the installer (build-release.ps1 ran again),"
+        $lines += "so the repo manifest is right and the installer's copy is stale."
+        $lines += "Fix: rebuild ONLY the installer:  cd electron; npm run dist:win"
+        $lines += "Do not re-run build-release.ps1 first - build timestamps change the checksums on every"
+        $lines += "run, so you would be back here."
+    } elseif ($bundBad.Count -eq 0) {
+        $lines += "Cause: the installer matches the assets in release\, but the REPO manifest no longer does -"
+        $lines += "it was edited or reverted after the build (e.g. a git checkout/restore discarded the"
+        $lines += "checksums build-release.ps1 wrote)."
+        $lines += "Fix: put the installer's copy back, then re-run this script:"
+        $lines += "  Copy-Item '$BundledPath' '$RepoPath'"
+    } else {
+        $lines += "Cause: neither manifest matches the files in release\ (repo is off for: $($repoBad -join ', '))."
+        $lines += "The assets changed after both were written."
+        $lines += "Fix: rebuild in order, each exactly once: build-release.ps1, then cd electron; npm run dist:win"
+    }
+    return ($lines -join "`n")
+}
+
 # ── 1. Locate the pieces ────────────────────────────────────────────────────
 if (-not (Test-Path $manifestPath)) { throw "Missing $manifestPath." }
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
@@ -104,8 +177,7 @@ if (Test-Path $bundledPath) {
     $repoHash    = Get-Sha256 $manifestPath
     $bundledHash = Get-Sha256 $bundledPath
     if ($repoHash -ne $bundledHash) {
-        throw "The installer was built against a DIFFERENT assets manifest. " +
-              "Rebuild it after building the assets: cd electron; npm run dist:win"
+        throw (Get-ManifestMismatchMessage $manifestPath $bundledPath $releaseDir)
     }
     Write-Host "    Bundled manifest matches the repo manifest." -ForegroundColor DarkGray
 } else {

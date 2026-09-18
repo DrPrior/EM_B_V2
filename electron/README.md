@@ -82,6 +82,35 @@ real temp dirs with a fake extractor: the version/checksum comparison, replacing
 an old bundle wholesale, and that a missing/wrong USB, a bad archive, or an
 interrupted swap never leaves the previous install broken.
 
+`test/procs.test.js` covers the readiness probes against throwaway local
+HTTP/TCP listeners — `/health` must be 200 *and* `{"status":"healthy"}`, a
+non-JSON body or a dead port is "not ready" rather than an exception, and the
+waits are bounded. This is the ordering Docker's `depends_on: service_healthy`
+used to provide.
+
+`test/archive.test.js` runs against the real OS `tar` and pins the positional
+contract shared by `build-release.ps1`, `lib/archive.js` and `lib/paths.js`: a
+contents-at-root zip must land at `<userData>/api/emb-api.exe` with no extra
+nesting, and `project_data.tar.gz` must keep its top-level directory.
+
+`test/envfile.test.js` pins `parseEnv` and, above all, that the generated Neo4j
+password **survives a second call** — it is baked into the store on first run, so
+regenerating it would lock the app out of its own graph.
+
+`test/snapshot.test.js` covers the import-once marker, including the cases that
+must force a re-import (a marker naming a different Neo4j home, and a legacy
+marker with no `dataDir`), plus the load→migrate sequence: that `migrate` is
+called after `load` and **without** `--to-format` (which would risk an
+Enterprise-only store), that a failed `load` is fatal and leaves no marker, and
+that a failed `migrate` is reported but does not abort the import.
+
+`test/electron-stub.js` is a helper, not a suite: it seeds the module cache so
+`require('electron')` yields a fake `app`, which is what lets modules reaching
+`lib/paths.js` run under plain `node --test`.
+
+`supervisor.js` and `firstrun.js` have **no** unit tests — their behaviour is
+process orchestration and multi-GB I/O. Validate them with the checklist below.
+
 ### In-place updates
 
 A new app build ships a new `assets.manifest.json` but keeps the first-run
@@ -251,11 +280,17 @@ userData dir: `first-run-complete.json`, `graph-imported.json`,
   `envfile.js` hands the children `NEO4J_AUTH`, `DB_URI=bolt://127.0.0.1:7687`
   and `DATA_ROOT` as **process env**. Neo4j and the API bind `127.0.0.1` only.
 - **Graph**: the snapshot is loaded offline (Neo4j stopped) with the bundled
-  `neo4j-admin database load` — the slow ingest/enrich pipeline is skipped
+  `neo4j-admin database load`, then `database migrate` brings the store up to the
+  bundled server's format version — the slow ingest/enrich pipeline is skipped
   entirely. The marker records the target data dir, so a relocated install
-  re-imports instead of coming up empty. The dump's store format must match the
-  bundled Neo4j line (`2026.07.x`) **and** be a Community-loadable record/aligned
-  dump, not Enterprise `block` — re-export if you change either.
+  re-imports instead of coming up empty.
+
+  The migrate is a **backstop, not the mechanism**: it costs about a second when
+  there is nothing to do, and it is deliberately non-fatal, because the server
+  start moments later is the real verdict. The dump you ship should already be at
+  the bundled server's format version — that is what
+  `scripts/stage-neo4j.ps1 -ReExport` produces. It must also be a
+  Community-loadable record/aligned dump, never Enterprise `block`.
 
 ## Verification (per plan)
 

@@ -75,12 +75,29 @@ Ollama returns to binding loopback only.
   (`2026.03.1` / `2026.05.0` / `2026.07.1`) from Neo4j Desktop; the ship path needs
   **Community** of the matching line, plus a JRE you may redistribute (Adoptium or
   Azul direct — not the copy in Neo4j Desktop's cache).
-- **The dump's store format is unverified.** The graph was built on Enterprise,
-  whose default store is `block`, and Community refuses to load a block dump.
-  `backup-block/neo4j.dump` (132 MB) and a newer `release/neo4j.dump` (47 MB) both
-  exist from 2026-09-14, suggesting a migration ran, but nothing records the
-  result. **Prove it by loading `release/neo4j.dump` into a fresh Community
-  install before trusting it.**
+- ~~The dump's store format is unverified.~~ **Settled 2026-09-17:
+  `release/neo4j.dump` is `record-aligned-1.1` — Community-loadable.** The
+  2026-09-14 block→record migration did happen and `release/neo4j.dump` is its
+  output; `backup-block/neo4j.dump` is the pre-migration original
+  (`block-block-1.1`, Enterprise-only). The live dev store is record format too
+  (35 store files, the classic `neostore.*` layout), which is why a dump taken
+  from it is loadable by Community despite Neo4j Desktop being Enterprise.
+
+  How it was checked, without a Community install and without stopping the
+  running database — load into a scratch data dir, then read the format:
+
+  ```powershell
+  $env:JAVA_HOME = "<Neo4jDesktop2>\Cache\runtime\zulu21...-jre21..."
+  $admin = "<Neo4jDesktop2>\Cache\dbmss\neo4j-enterprise-2026.07.1\bin\neo4j-admin.bat"
+  # scratch.conf sets server.directories.data + .transaction.logs.root to a temp dir
+  & $admin database load --from-path=<repo>\release --additional-config=scratch.conf neo4j
+  & $admin database info --from-path=<temp>\data\databases neo4j
+  ```
+
+  `database load --info` alone is not enough — it reports the *archive* format
+  ("Neo4j ZSTD Dump"), never the store format. Re-verify this way after any
+  re-export, because the check is cheap and a mismatch only surfaces on the
+  user's machine.
 - **⚠️ Defender ASR blocks the frozen exe outright — verified 2026-09-17 on the
   dev machine.** Launching `dist/emb-api/emb-api.exe` fails with `Access is
   denied.` and no Python traceback. The cause is in the Defender Operational log
@@ -115,9 +132,14 @@ Ollama returns to binding loopback only.
   installer both ship unsigned. Gated on the UALR certificate — and see the ASR
   item above, which raises the stakes: unsigned here means "does not run", not
   just "shows a warning".
-- **No end-to-end run.** `procs.js`, `supervisor.js`, `firstrun.js`, `snapshot.js`
-  and `archive.js` have **no unit tests** (only `apibundle`, `logger`, `ollamaenv`
-  do). A clean-machine first run is the only thing that exercises them.
+- **No end-to-end run.** Unit coverage now reaches the decidable parts —
+  `procs` (readiness probes), `archive` (the contents-at-root contract, against
+  the real OS `tar`), `envfile` (password stability) and `snapshot` (the
+  import-once marker), alongside `apibundle`, `logger` and `ollamaenv`: 86 tests.
+  What unit tests cannot reach is still the risky part: **`supervisor.js` and
+  `firstrun.js` are only exercised by a real first run** — startup ordering,
+  crash detection, orphan cleanup, port collisions, and the multi-GB unpack.
+  That run is blocked on Workstream C and the ASR rule above.
 
 ## How the runtimes ship
 
@@ -142,16 +164,28 @@ shipped must be signed or installer-free.
 - **Store-format line = `2026.07.x`**, to match the dump. `neo4j-admin database
   load` refuses a store-format mismatch. (This supersedes the `2026.04.0` pin
   from the Docker era, now corrected everywhere.)
-- **Community vs Enterprise is the sharp edge.** Dev runs Enterprise via Neo4j
-  Desktop, and Enterprise defaults to the `block` store format, which **Community
-  cannot load**. The dump you ship must be record/aligned. `backup-block/neo4j.dump`
-  plus a newer, smaller `release/neo4j.dump` suggest a block→record migration
-  already ran on 2026-09-14, but that was never verified or written down — load
-  `release/neo4j.dump` into a fresh Community install and confirm before shipping.
+- **Community vs Enterprise is the sharp edge — but the dump is fine.** Dev runs
+  Enterprise via Neo4j Desktop, and Enterprise defaults to the `block` store
+  format, which **Community cannot load**. The shipped dump must be
+  record/aligned, and `release/neo4j.dump` is: verified `record-aligned-1.1` on
+  2026-09-17 (see Remaining above for the one-command check). So Workstream C no
+  longer carries dump risk — only the staging work. Re-verify after any
+  re-export, since a future `neo4j-admin database dump` on a block-format store
+  would silently produce an unloadable artifact.
 - First-run order: `neo4j-admin dbms set-initial-password <random>` **before** the
-  first start → `neo4j-admin database load` the dump (offline) → `neo4j console`.
-  Password-before-init is mandatory or auth breaks (same trap the Docker volume had).
-  This is what `lib/firstrun.js` + `lib/snapshot.js` already do.
+  first start → `neo4j-admin database load` the dump (offline) → `database migrate`
+  → `neo4j console`. Password-before-init is mandatory or auth breaks (same trap
+  the Docker volume had). This is what `lib/firstrun.js` + `lib/snapshot.js` do.
+- **Ship a dump that is already at the bundled server's format version.**
+  `lib/snapshot.js` loads the dump and the server then starts; the `migrate` call
+  it makes is a non-fatal backstop, not something to rely on. If the bundled
+  Neo4j is a different release from the one the dump was taken on, produce the
+  shipped dump with `scripts/stage-neo4j.ps1 -ReExport`, which loads, migrates,
+  dumps back out, and verifies the **re-exported** file's store format. Getting
+  this wrong fails on the user's machine after a multi-GB unpack.
+- Staging both homes is `scripts/stage-neo4j.ps1` — it unpacks the Neo4j and JRE
+  zips, applies the loopback/memory settings, and can set the password and load
+  the dump, so `-Neo4jHome` / `-JreHome` are reproducible rather than hand-made.
 - Config the zipped Neo4j home before staging it: bind bolt + http to `127.0.0.1`;
   data dir + modest heap/pagecache under the app's userData dir.
 - JRE licensing: take it from Adoptium or Azul directly so it is yours to
@@ -185,7 +219,9 @@ remembering when touching them:
 ## Top pitfalls (consolidated)
 
 1. **Neo4j store-format lock** — bundle `2026.07.x`, and make sure the dump is
-   record/aligned (Community-loadable), not Enterprise `block`.
+   record/aligned (Community-loadable), not Enterprise `block`. The current
+   `release/neo4j.dump` is verified `record-aligned-1.1`; re-check after any
+   re-export.
 2. **Neo4j password before first init**, then load.
 3. **IT's unsigned-installer block** — sign the API exe *and* the installer;
    gated on the UALR cert being staged.
@@ -214,10 +250,11 @@ remembering when touching them:
    first: it gates every later validation step, and a signing cert that doesn't
    clear the rule invalidates the delivery model.
 2. **Bundle Neo4j + JRE**: stage a Community `2026.07.x` home + a redistributable
-   JRE, set the password, load the dump, start it by hand — and confirm the dump
-   is record/aligned rather than Enterprise `block`.
+   JRE, set the password, load the (verified record-aligned) dump, start it by
+   hand. This is now the only workstream with real unknowns left.
 3. ~~**Electron rewrite**~~ and ~~**build pipeline**~~ — done; see **Progress**.
 4. **Sign** the API exe and the installer once the UALR cert exists; re-check
    against the ASR rule.
-5. **Clean-machine first-run test** — the only coverage `procs`/`supervisor`/
-   `firstrun`/`snapshot` have.
+5. **Clean-machine first-run test** — the only coverage `supervisor.js` and
+   `firstrun.js` have (the decidable parts of `procs`, `archive`, `envfile` and
+   `snapshot` are unit-tested now).

@@ -41,10 +41,12 @@
     Where the staged homes are written. Default C:\stage — giving
     <StageDir>\neo4j and <StageDir>\jre.
 
-.PARAMETER Password
-    If given, runs `neo4j-admin dbms set-initial-password`. MUST happen before
-    the database is first started, or authentication is baked in wrong and the
-    app cannot open its own store.
+    There is deliberately no -Password switch. `dbms set-initial-password` ignores
+    --additional-config and writes data\dbms\auth.ini into the Neo4j home itself,
+    which build-release.ps1 would then zip — shipping a known credential to every
+    user. The password belongs on the END USER's machine, where lib/firstrun.js
+    generates a random one and sets it before the first start. To smoke-test
+    locally, copy the staged home first; the script prints how.
 
 .PARAMETER Dump
     A neo4j.dump to load (its DIRECTORY is passed to --from-path). After loading,
@@ -76,7 +78,7 @@
     pwsh -File scripts/stage-neo4j.ps1 `
       -Zip C:\Downloads\neo4j-community-2026.08.1-windows.zip `
       -JreZip C:\Downloads\OpenJDK21U-jre_x64_windows_hotspot.zip `
-      -Password devpassword -Dump .\release\neo4j.dump -ReExport
+      -Dump .\release\neo4j.dump -ReExport
 
     Stage both homes, load the graph, migrate it to the bundled server's format,
     and write the migrated dump back to release\ ready for build-release.ps1.
@@ -92,7 +94,6 @@ param(
     [string]$JreZip,
     [string]$JreHome,
     [string]$StageDir = "C:\stage",
-    [string]$Password,
     [string]$Dump,
     [switch]$ReExport,
     [string]$HeapSize = "1g",
@@ -195,6 +196,47 @@ function Get-DumpStoreFormat([string]$AdminPath, [string]$JavaHome, [string]$Dum
     }
 }
 
+<#
+    Make sure the Neo4j home about to be zipped carries no database state.
+
+    build-release.ps1 zips this home's CONTENTS, so anything under data\ ships to
+    every user. Two things can get there, and both are bad:
+
+      data\dbms\auth.ini        a credential. `dbms set-initial-password` IGNORES
+                                --additional-config and always writes into
+                                <NEO4J_HOME>\data, so one stray invocation bakes
+                                a known password into the bundle.
+      data\databases\neo4j\     the whole graph (~140 MB) — on top of the
+                                neo4j.dump we already ship, which snapshot.js
+                                loads over it with --overwrite-destination=true.
+                                Pure waste.
+
+    Empty leftover directories are harmless and get recreated, so clear the lot
+    and report anything that actually held data.
+#>
+function Assert-ShipClean([string]$HomeDir) {
+    $data = Join-Path $HomeDir "data"
+    if (-not (Test-Path $data)) {
+        New-Item -ItemType Directory -Force -Path $data | Out-Null
+        return
+    }
+
+    $auth = Join-Path $data "dbms\auth.ini"
+    $store = Join-Path $data "databases\neo4j"
+    $hadAuth = Test-Path $auth
+    $hadStore = (Test-Path $store) -and @(Get-ChildItem $store -Force -ErrorAction SilentlyContinue).Count -gt 0
+
+    Get-ChildItem $data -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+    if ($hadAuth -or $hadStore) {
+        Write-Host "==> Cleared database state from the staged home (it must not ship):" -ForegroundColor Yellow
+        if ($hadAuth)  { Write-Host "      removed data\dbms\auth.ini (a credential)" -ForegroundColor Yellow }
+        if ($hadStore) { Write-Host "      removed data\databases\neo4j (the graph ships as neo4j.dump)" -ForegroundColor Yellow }
+    } else {
+        Write-Host "==> Staged home is ship-clean (data\ is empty)." -ForegroundColor Green
+    }
+}
+
 # ── 1. Stage the two homes ──────────────────────────────────────────────────
 
 if ($Zip)    { $Neo4jHome = Expand-Flattened $Zip    (Join-Path $StageDir "neo4j") "Neo4j Community" }
@@ -236,14 +278,11 @@ foreach ($k in $settings.Keys) {
     Write-Host ("    {0,-34} {1}" -f $k, $settings[$k]) -ForegroundColor DarkGray
 }
 
-# ── 3. Password before first init (mandatory ordering) ──────────────────────
-
-if ($Password) {
-    Write-Host "==> Setting the initial password (must precede first start) ..." -ForegroundColor Cyan
-    Invoke-Admin $admin $JreHome @("dbms", "set-initial-password", $Password)
-}
-
-# ── 4. Load + migrate + verify the dump ─────────────────────────────────────
+# ── 3. Migrate + re-export the dump, in a SCRATCH data directory ────────────
+#
+# Everything below redirects server.directories.* into a temp dir. The Neo4j
+# home staged above must reach build-release.ps1 with an EMPTY data/ — see
+# Assert-ShipClean for what would otherwise end up in neo4j-community.zip.
 
 if ($Dump) {
     if (-not (Test-Path $Dump)) { throw "Dump not found: $Dump" }
@@ -253,57 +292,82 @@ if ($Dump) {
         throw "neo4j-admin loads <database>.dump; rename '$dumpName' to neo4j.dump or point -Dump at one."
     }
 
-    Write-Host "==> Loading $Dump ..." -ForegroundColor Cyan
-    Invoke-Admin $admin $JreHome @("database", "load", "neo4j", "--from-path=$dumpDir", "--overwrite-destination=true")
-
-    # Migrate to THIS server's current version of the same format. Without
-    # --to-format it stays in the current family, so an `aligned` (record) store
-    # stays Community-loadable; --to-format=block would make it Enterprise-only.
-    Write-Host "==> Migrating the store to this server's format version ..." -ForegroundColor Cyan
-    Invoke-Admin $admin $JreHome @("database", "migrate", "neo4j")
-
-    Write-Host "==> Resulting store format:" -ForegroundColor Cyan
-    Invoke-Admin $admin $JreHome @("database", "info", "--from-path=$(Join-Path $Neo4jHome 'data\databases')", "neo4j")
-
-    Write-Host ""
-    Write-Host "Confirm the format above is an 'aligned' (record) one. 'block' means" -ForegroundColor Yellow
-    Write-Host "Enterprise-only and the desktop app's Community server cannot load it." -ForegroundColor Yellow
-
-    # ── 4b. Re-export, so the artifact that SHIPS is already migrated ───────
-    if ($ReExport) {
-        # snapshot.js loads the dump and starts the server; it cannot be relied
-        # on to migrate. So the shipped dump must already match the bundled
-        # server, or first run dies after a multi-GB unpack.
-        $backup = Join-Path $dumpDir "neo4j.dump.pre-migration"
-        if (-not (Test-Path $backup)) {
-            Write-Host "==> Preserving the pre-migration dump -> $backup" -ForegroundColor Cyan
-            Copy-Item (Join-Path $dumpDir "neo4j.dump") $backup
-        } else {
-            Write-Host "==> Keeping the existing $([IO.Path]::GetFileName($backup)) (not overwriting it)." -ForegroundColor DarkGray
-        }
-
-        Write-Host "==> Re-exporting the migrated store -> $dumpDir\neo4j.dump" -ForegroundColor Cyan
-        Invoke-Admin $admin $JreHome @(
-            "database", "dump", "neo4j", "--to-path=$dumpDir", "--overwrite-destination=true"
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("stage-db-" + [guid]::NewGuid().ToString().Substring(0, 8))
+    New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+    try {
+        $scratchCfg = Join-Path $scratch "scratch.conf"
+        $posix = $scratch.Replace('\', '/')
+        Set-Content -Path $scratchCfg -Encoding ascii -Value @(
+            "server.directories.data=$posix/data",
+            "server.directories.transaction.logs.root=$posix/tx"
         )
 
-        Write-Host "==> Verifying the RE-EXPORTED dump (the file that ships) ..." -ForegroundColor Cyan
-        $format = Get-DumpStoreFormat $admin $JreHome $dumpDir
-        Write-Host "    Store format version: $format" -ForegroundColor Green
-        if ($format -match 'block') {
-            throw "The re-exported dump is '$format' — Enterprise-only. The bundled Community server cannot load it."
+        Write-Host "==> Loading $Dump into a scratch store ..." -ForegroundColor Cyan
+        Invoke-Admin $admin $JreHome @(
+            "database", "load", "neo4j", "--from-path=$dumpDir",
+            "--overwrite-destination=true", "--additional-config=$scratchCfg"
+        )
+
+        # Migrate to THIS server's current version of the same format. Without
+        # --to-format it stays in the current family, so an `aligned` (record)
+        # store stays Community-loadable; --to-format=block would make it
+        # Enterprise-only. It is a ~1s no-op when nothing needs doing.
+        Write-Host "==> Migrating the store to this server's format version ..." -ForegroundColor Cyan
+        Invoke-Admin $admin $JreHome @("database", "migrate", "neo4j", "--additional-config=$scratchCfg")
+
+        Write-Host "==> Resulting store format:" -ForegroundColor Cyan
+        Invoke-Admin $admin $JreHome @("database", "info", "--from-path=$scratch\data\databases", "neo4j")
+
+        # ── 3b. Re-export, so the artifact that SHIPS is already migrated ───
+        if ($ReExport) {
+            # snapshot.js loads the dump and starts the server; its migrate call
+            # is a non-fatal backstop, not something to rely on. So the shipped
+            # dump must already match the bundled server.
+            $backup = Join-Path $dumpDir "neo4j.dump.pre-migration"
+            if (-not (Test-Path $backup)) {
+                Write-Host "==> Preserving the pre-migration dump -> $backup" -ForegroundColor Cyan
+                Copy-Item (Join-Path $dumpDir "neo4j.dump") $backup
+            } else {
+                Write-Host "==> Keeping the existing $([IO.Path]::GetFileName($backup)) (not overwriting it)." -ForegroundColor DarkGray
+            }
+
+            Write-Host "==> Re-exporting the migrated store -> $dumpDir\neo4j.dump" -ForegroundColor Cyan
+            Invoke-Admin $admin $JreHome @(
+                "database", "dump", "neo4j", "--to-path=$dumpDir",
+                "--overwrite-destination=true", "--additional-config=$scratchCfg"
+            )
+
+            Write-Host "==> Verifying the RE-EXPORTED dump (the file that ships) ..." -ForegroundColor Cyan
+            $format = Get-DumpStoreFormat $admin $JreHome $dumpDir
+            Write-Host "    Store format version: $format" -ForegroundColor Green
+            if ($format -match 'block') {
+                throw "The re-exported dump is '$format' — Enterprise-only. The bundled Community server cannot load it."
+            }
+            if ($format -notmatch 'aligned|standard') {
+                Write-Warning "Unrecognized store format '$format'. Confirm Community can load it before shipping."
+            }
         }
-        if ($format -notmatch 'aligned|standard') {
-            Write-Warning "Unrecognized store format '$format'. Confirm Community can load it before shipping."
-        }
+    } finally {
+        if (Test-Path $scratch) { Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+
+# ── 4. The staged home must ship empty ──────────────────────────────────────
+
+Assert-ShipClean $Neo4jHome
 
 # ── 5. What to do next ──────────────────────────────────────────────────────
 
 Write-Host ""
 Write-Host "Staged. Next:" -ForegroundColor Green
-Write-Host "  1. Start it by hand to check:  `$env:JAVA_HOME='$JreHome'; & '$Neo4jHome\bin\neo4j.bat' console"
-Write-Host "  2. Build the release assets:"
+Write-Host "  1. Build the release assets:"
 Write-Host "       pwsh -File electron/scripts/build-release.ps1 -Neo4jHome '$Neo4jHome' -JreHome '$JreHome'"
-Write-Host "  3. Rebuild the installer, then stage the USB (see docs/DECONTAINERIZE_PLAN.md)."
+Write-Host "  2. Rebuild the installer, then stage the USB (see docs/DECONTAINERIZE_PLAN.md)."
+Write-Host ""
+Write-Host "To smoke-test the server by hand, do it on a COPY — starting it writes a" -ForegroundColor DarkGray
+Write-Host "store and an auth.ini into data\, which must not reach the shipped zip:" -ForegroundColor DarkGray
+Write-Host "    Copy-Item '$Neo4jHome' C:\stage\neo4j-smoketest -Recurse" -ForegroundColor DarkGray
+Write-Host "    `$env:JAVA_HOME='$JreHome'" -ForegroundColor DarkGray
+Write-Host "    C:\stage\neo4j-smoketest\bin\neo4j-admin.bat dbms set-initial-password <pw>" -ForegroundColor DarkGray
+Write-Host "    C:\stage\neo4j-smoketest\bin\neo4j-admin.bat database load neo4j --from-path='$($dumpDir ?? "<dump dir>")'" -ForegroundColor DarkGray
+Write-Host "    C:\stage\neo4j-smoketest\bin\neo4j.bat console" -ForegroundColor DarkGray

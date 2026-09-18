@@ -116,6 +116,24 @@ Compress-Contents $apiDist $apiOut
 # ── 2. Neo4j Community + JRE ────────────────────────────────────────────────
 Write-Host "==> [2/5] Zipping Neo4j Community -> neo4j-community.zip ..." -ForegroundColor Cyan
 if (-not (Test-Path (Join-Path $Neo4jHome "bin"))) { throw "$Neo4jHome does not look like a Neo4j home (no bin/)." }
+
+# The zip takes this home's CONTENTS, so anything under data\ ships to every
+# user. Refuse the two that matter rather than discovering them in the field:
+# an auth.ini is a credential in the bundle (`dbms set-initial-password` ignores
+# --additional-config and always writes into the Neo4j home), and a populated
+# store is ~140 MB duplicating the neo4j.dump that snapshot.js loads over it
+# anyway. scripts/stage-neo4j.ps1 leaves the home clean; this is the backstop.
+$authIni = Join-Path $Neo4jHome "data\dbms\auth.ini"
+if (Test-Path $authIni) {
+    throw ("$Neo4jHome carries data\dbms\auth.ini — that credential would ship to every user. " +
+           "Delete data\ and re-stage (scripts/stage-neo4j.ps1).")
+}
+$stagedStore = Join-Path $Neo4jHome "data\databases\neo4j"
+if ((Test-Path $stagedStore) -and @(Get-ChildItem $stagedStore -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+    throw ("$Neo4jHome carries a populated data\databases\neo4j — the graph already ships as " +
+           "neo4j.dump, and first run overwrites this copy. Delete data\ and re-stage.")
+}
+
 $neo4jOut = Join-Path $OutDir "neo4j-community.zip"
 Compress-Contents $Neo4jHome $neo4jOut
 

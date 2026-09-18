@@ -33,11 +33,20 @@ bind; that variable was a container-era requirement. The API builds the
 
 ## 3. Neo4j (native)
 
-Install a native Neo4j server on the **`2026.07.x`** line — the line the current
-graph and `neo4j.dump` live on, so a native install can load that dump without a
-store-format mismatch (the version lock in `DECONTAINERIZE_PLAN.md` §C). Neo4j
-needs a **JRE (17/21)**; either use a distribution that bundles one or install
-Java separately.
+Install a native Neo4j server on the **`2026.08.x`** line. That's what the
+desktop app ships (Community 2026.08.1) and what the maintainer's dev DBMS runs,
+so dumps move between them without a store-format mismatch (see
+`DECONTAINERIZE_PLAN.md`, *C. as built*). Neo4j needs a **JRE 17 or 21**, not
+newer: either use a distribution that bundles one or install Java separately.
+
+**Upgrading an existing dev DBMS** (as done 2026-09-18, 2026.07.1 → 2026.08.1):
+stop it, back it up (`bin\neo4j-admin database dump neo4j --to-path=<dir>`, and
+the same for `system`), then use Neo4j Desktop's **Upgrade**. Keep the store
+format (`aligned`) if asked; never `block`. Start it, then **make one write**:
+a user database stays on the old kernel version until its first write
+transaction, so read-only checks look finished when they aren't. A net-zero
+write does it, `CREATE (n:__Probe) WITH n DELETE n`. Confirm `Upgrade
+transaction from … to … completed` for `neo4j` in `logs\debug.log`.
 
 Options: the Community **zip** (unpack, no admin — closest to what the desktop
 app bundles) or **Neo4j Desktop** (GUI, easier for dev).

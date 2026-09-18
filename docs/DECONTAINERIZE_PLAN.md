@@ -1,10 +1,11 @@
 # Decontainerization Plan
 
-> **Status: CODE DONE — release artifacts remain.** The API, the dev/pipeline
-> flow, the Electron shell and the build scripts all run native, with no
-> container assumptions anywhere. What's left is not code: **stage a Community
-> Neo4j + a redistributable JRE**, **settle the dump's store format**,
-> **code-sign**, and **prove a first run on a clean machine**. This doc is the
+> **Status: CODE DONE, NEO4J STAGED — build, sign, and prove it.** The API, the
+> dev/pipeline flow, the Electron shell and the build scripts all run native.
+> Workstream C is done: Community 2026.08.1 + Temurin JRE 21 are staged, and the
+> shipped dump is verified to load and serve on that exact server. What's left:
+> **run the release build**, **code-sign** (blocked on the UALR cert + the ASR
+> rule below), and **prove a first run on a clean machine**. This doc is the
 > canonical source of truth; every other doc's "decontainerization" banner points
 > here. Working branch: `Decontainerize`.
 
@@ -47,7 +48,7 @@ Ollama returns to binding loopback only.
   and `ollama_bootstrap` + `main.py` now resolve Modelfiles and the static UI
   through it (frozen-ready). The Docker files (`Dockerfile*`, `docker-compose*.yml`)
   were deleted.
-- Graph **rebuilt** on native Neo4j (`2026.07.x`): 10,360 chunks at 768-d, vector
+- Graph **rebuilt** on native Neo4j (`2026.07.x`, dev since upgraded to 2026.08.1): 10,360 chunks at 768-d, vector
   index `chunk_vector_idx` ONLINE.
 - **D — Electron native stack:** `lib/docker.js` and `lib/compose.js` **deleted**;
   `lib/procs.js` spawns `neo4j console` (with the bundled JRE as `JAVA_HOME`) and
@@ -70,11 +71,14 @@ Ollama returns to binding loopback only.
 
 **Remaining — artifacts and validation, not code:**
 
-- **C inputs are not staged.** `build-release.ps1` needs `-Neo4jHome` and
-  `-JreHome`, and neither exists yet. The dev box has only **Enterprise** DBMSs
-  (`2026.03.1` / `2026.05.0` / `2026.07.1`) from Neo4j Desktop; the ship path needs
-  **Community** of the matching line, plus a JRE you may redistribute (Adoptium or
-  Azul direct — not the copy in Neo4j Desktop's cache).
+- ~~C inputs are not staged.~~ **Done 2026-09-18** — see *C. as built* below.
+  Neo4j Community **2026.08.1** at `C:\stage\neo4j`, Temurin **JRE 21.0.12.1** at
+  `C:\stage\jre`, both produced by `scripts/stage-neo4j.ps1`.
+- **Run the release build.** `build-release.ps1 -Neo4jHome C:\stage\neo4j
+  -JreHome C:\stage\jre -Python <pyAI>\python.exe`, then `npm run dist:win`, then
+  `stage-usb.ps1 -Verify`. Pass `-Python` explicitly: the `python` on PATH is a
+  system Python without PyInstaller or the app's deps, and the preflight will
+  refuse it.
 - ~~The dump's store format is unverified.~~ **Settled 2026-09-17:
   `release/neo4j.dump` is `record-aligned-1.1` — Community-loadable.** The
   2026-09-14 block→record migration did happen and `release/neo4j.dump` is its
@@ -88,7 +92,7 @@ Ollama returns to binding loopback only.
 
   ```powershell
   $env:JAVA_HOME = "<Neo4jDesktop2>\Cache\runtime\zulu21...-jre21..."
-  $admin = "<Neo4jDesktop2>\Cache\dbmss\neo4j-enterprise-2026.07.1\bin\neo4j-admin.bat"
+  $admin = "<Neo4jDesktop2>\Cache\dbmss\neo4j-enterprise-2026.08.1\bin\neo4j-admin.bat"  # or C:\stage\neo4j\bin
   # scratch.conf sets server.directories.data + .transaction.logs.root to a temp dir
   & $admin database load --from-path=<repo>\release --additional-config=scratch.conf neo4j
   & $admin database info --from-path=<temp>\data\databases neo4j
@@ -139,7 +143,9 @@ Ollama returns to binding loopback only.
   What unit tests cannot reach is still the risky part: **`supervisor.js` and
   `firstrun.js` are only exercised by a real first run** — startup ordering,
   crash detection, orphan cleanup, port collisions, and the multi-GB unpack.
-  That run is blocked on Workstream C and the ASR rule above.
+  That run is blocked on the ASR rule above. (The Neo4j half of first run —
+  password → load → migrate → start — has been exercised by hand against the
+  staged server; see *C. as built*.)
 
 ## How the runtimes ship
 
@@ -156,40 +162,80 @@ shipped must be signed or installer-free.
 - **Neo4j — Community zip + bundled JRE**, unpacked (no admin service install).
   Supervisor runs `neo4j console` as a child.
 
-## C. Bundle native Neo4j + JRE (the remaining workstream)
+## C. as built (Neo4j + JRE)
 
-- Ship **Neo4j Community (unpacked zip) + a bundled JRE 17/21** under the app's
-  resources; no admin installer. Neither is staged yet — `build-release.ps1`
-  takes them as `-Neo4jHome` / `-JreHome`.
-- **Store-format line = `2026.07.x`**, to match the dump. `neo4j-admin database
-  load` refuses a store-format mismatch. (This supersedes the `2026.04.0` pin
-  from the Docker era, now corrected everywhere.)
-- **Community vs Enterprise is the sharp edge — but the dump is fine.** Dev runs
-  Enterprise via Neo4j Desktop, and Enterprise defaults to the `block` store
-  format, which **Community cannot load**. The shipped dump must be
-  record/aligned, and `release/neo4j.dump` is: verified `record-aligned-1.1` on
-  2026-09-17 (see Remaining above for the one-command check). So Workstream C no
-  longer carries dump risk — only the staging work. Re-verify after any
-  re-export, since a future `neo4j-admin database dump` on a block-format store
-  would silently produce an unloadable artifact.
+**What ships:** Neo4j **Community 2026.08.1** (unpacked zip) + Temurin **JRE
+21.0.12.1** (zip, not installer), staged at `C:\stage\neo4j` / `C:\stage\jre` by
+`scripts/stage-neo4j.ps1`. `release/neo4j.dump` is at that server's formats.
+
+**How we got there, and what each step taught us:**
+
+- **Finding the download.** The Neo4j Deployment Center lists only the newest
+  release, so older lines look gone. They aren't: `dist.neo4j.org` serves them
+  by direct URL (`neo4j-community-<ver>-windows.zip` + `.sha256`). We chose the
+  then-current 2026.08.1 over the dump's original 2026.07.1, since a two-month-old
+  database server is an easy objection in an IT review.
+- **The JRE.** Neo4j 2026.x is built and tested on Java 17/21: Neo4j Desktop
+  bundles only those, and the dev server logs Azul Zulu 21. A JDK 25 `.msi` was
+  the first download, and it failed on two counts, installer and version.
+  `stage-neo4j.ps1` now rejects installers and checks `java -version`. The
+  stable URL for the right artifact is
+  `https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse`
+  (~47 MB; a JDK would be ~180 MB).
+- **Keeping the zipped home clean.** `dbms set-initial-password` **ignores
+  `--additional-config`** and always writes `<NEO4J_HOME>\data\dbms\auth.ini`.
+  Pointed at the home that gets zipped, that would ship a credential to every
+  user, plus ~140 MB of graph duplicating `neo4j.dump`. So the script runs
+  load/migrate/re-export in a scratch data dir, which *those* commands honour.
+  It has no `-Password`, and it empties `data\` at the end. `build-release.ps1`
+  refuses to zip a home carrying `auth.ini` or a populated store. Expect empty
+  `data\transactions\` leftovers even from scratch-redirected commands; the
+  guard allows them.
+- **Migration, in three layers, all verified on the staged Community server:**
+  1. *Store format:* `record-aligned-1.1` in both 2026.07 and 2026.08, so
+     `migrate` was a no-op ("current store version and the migration target
+     version are the same"). It's safe to run unconditionally, which is why
+     `snapshot.js` does.
+  2. *Database kernel version:* separate from the format. The re-exported dump
+     starts on `V2026_08` under 2026.08.1.
+  3. *Data:* 10,360 chunks (768-d), 147 files, 50,581 entities, 14 constraints,
+     `chunk_vector_idx` ONLINE 100% with a working similarity query, no
+     recovery pending, bound to `127.0.0.1` only.
+- **Community vs Enterprise stays the sharp edge.** Dev runs Enterprise, which
+  defaults *new* databases to `block`, a format Community cannot load.
+  Existing stores keep their format through upgrades (verified below), but
+  re-verify any re-export with the scratch-load check above. A dump taken from a
+  block store produces an artifact that won't load, and nothing warns you.
+
+**Dev was upgraded to match (2026-09-18):** Neo4j Desktop's in-place Upgrade
+took the dev DBMS from Enterprise 2026.07.1 to **2026.08.1**. It kept
+`record-aligned-1.1` and every transaction (31,582). One trap: on first start
+Enterprise's `SystemGraphAutoUpgrader` moves the **system** database's kernel to
+`V2026_08` straight away, but a **user** database stays on the old kernel
+(`V2026_07`) **until its first write transaction**. Reads never trigger it, so
+a read-only verification looks done when it isn't. Trigger it with a net-zero
+write (`CREATE (n:__Probe) WITH n DELETE n`) and confirm `Upgrade transaction
+from … to … completed` for `neo4j` in `debug.log`. The pre-upgrade backup is
+`backup-dev-2026.07.1/` (`neo4j.dump` + `system.dump`).
+
+**Rules that still apply when you touch any of this:**
+
 - First-run order: `neo4j-admin dbms set-initial-password <random>` **before** the
   first start → `neo4j-admin database load` the dump (offline) → `database migrate`
   → `neo4j console`. Password-before-init is mandatory or auth breaks (same trap
-  the Docker volume had). This is what `lib/firstrun.js` + `lib/snapshot.js` do.
+  the Docker volume had). This is what `lib/firstrun.js` + `lib/snapshot.js` do,
+  and it was exercised by hand against the staged server.
 - **Ship a dump that is already at the bundled server's format version.**
-  `lib/snapshot.js` loads the dump and the server then starts; the `migrate` call
-  it makes is a non-fatal backstop, not something to rely on. If the bundled
-  Neo4j is a different release from the one the dump was taken on, produce the
-  shipped dump with `scripts/stage-neo4j.ps1 -ReExport`, which loads, migrates,
-  dumps back out, and verifies the **re-exported** file's store format. Getting
-  this wrong fails on the user's machine after a multi-GB unpack.
-- Staging both homes is `scripts/stage-neo4j.ps1` — it unpacks the Neo4j and JRE
-  zips, applies the loopback/memory settings, and can set the password and load
-  the dump, so `-Neo4jHome` / `-JreHome` are reproducible rather than hand-made.
-- Config the zipped Neo4j home before staging it: bind bolt + http to `127.0.0.1`;
-  data dir + modest heap/pagecache under the app's userData dir.
+  `lib/snapshot.js`'s `migrate` is a non-fatal backstop, not something to rely
+  on. When the bundled Neo4j changes release, regenerate the shipped dump with
+  `stage-neo4j.ps1 -Dump .\release\neo4j.dump -ReExport` (load → migrate →
+  re-dump → verify the **re-exported** file; the original is kept as
+  `neo4j.dump.pre-migration`).
+- Re-stage with `scripts/stage-neo4j.ps1` rather than editing `C:\stage` by
+  hand. It applies the loopback binds and 1g heap / 512m page cache, and leaves
+  `data\` empty.
 - JRE licensing: take it from Adoptium or Azul directly so it is yours to
-  redistribute — not the copy sitting in Neo4j Desktop's cache.
+  redistribute, not the copy sitting in Neo4j Desktop's cache.
 
 ## D / E as built
 
@@ -218,7 +264,7 @@ remembering when touching them:
 
 ## Top pitfalls (consolidated)
 
-1. **Neo4j store-format lock** — bundle `2026.07.x`, and make sure the dump is
+1. **Neo4j store-format lock** — the bundled server is `2026.08.1`; make sure the dump is
    record/aligned (Community-loadable), not Enterprise `block`. The current
    `release/neo4j.dump` is verified `record-aligned-1.1`; re-check after any
    re-export.
@@ -239,6 +285,17 @@ remembering when touching them:
    plugin imports, so a maintainer's env leaks into the artifact (`python-pptx →
    PIL → IPython/Tk`, `pydantic.mypy → mypy`). `emb-api.spec`'s `EXCLUDES` is the
    guard; re-check the bundle's top-level dirs after adding a dependency.
+10. **Freeze from the right Python.** A Python with PyInstaller but without the
+    app's deps freezes "successfully" into a bundle that dies on launch, because
+    PyInstaller only warns about unresolvable imports. `build-release.ps1`'s
+    step 0 imports `src.main` to refuse that.
+11. **`set-initial-password` ignores `--additional-config`.** It writes
+    `auth.ini` into whichever Neo4j home owns the `neo4j-admin` you run. Never
+    run it against a home that will be zipped, or against a shared Neo4j Desktop
+    cache distribution.
+12. **An upgraded user database finishes its kernel upgrade on first write.**
+    After a Neo4j upgrade, read-only checks can pass while the database is
+    still on the old kernel version. See *C. as built*.
 
 (`unstructured` freeze risk — retired: the dep is unused and now dropped.)
 
@@ -249,12 +306,14 @@ remembering when touching them:
    PDF/PPTX/DOCX" is **still open**, blocked by the ASR rule above. Resolve that
    first: it gates every later validation step, and a signing cert that doesn't
    clear the rule invalidates the delivery model.
-2. **Bundle Neo4j + JRE**: stage a Community `2026.07.x` home + a redistributable
-   JRE, set the password, load the (verified record-aligned) dump, start it by
-   hand. This is now the only workstream with real unknowns left.
+2. ~~**Bundle Neo4j + JRE**~~ — done 2026-09-18: Community 2026.08.1 + JRE 21
+   staged, dump re-exported, and the full first-run Neo4j sequence proven by
+   hand against it. Dev upgraded to 2026.08.1 to match.
 3. ~~**Electron rewrite**~~ and ~~**build pipeline**~~ — done; see **Progress**.
-4. **Sign** the API exe and the installer once the UALR cert exists; re-check
+4. **Run the release build** (`build-release.ps1` with `-Python`) → installer →
+   USB. Nothing blocks this now.
+5. **Sign** the API exe and the installer once the UALR cert exists; re-check
    against the ASR rule.
-5. **Clean-machine first-run test** — the only coverage `supervisor.js` and
+6. **Clean-machine first-run test** — the only coverage `supervisor.js` and
    `firstrun.js` have (the decidable parts of `procs`, `archive`, `envfile` and
    `snapshot` are unit-tested now).

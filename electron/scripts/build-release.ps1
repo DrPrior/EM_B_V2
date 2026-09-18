@@ -9,7 +9,7 @@
 .DESCRIPTION
     Decontainerized build (no Docker image). USB delivery, no download server.
     Run on a maintainer machine that has: the Python deps installed (for
-    PyInstaller), a pre-configured Neo4j Community <2026.07.x> home, a JRE, and
+    PyInstaller), a Neo4j Community 2026.08.x home staged by scripts/stage-neo4j.ps1, a JRE, and
     the aligned graph dump produced by the migration (see docs/DECONTAINERIZE_PLAN.md).
 
     Outputs (in -OutDir, default <repo>/release), copied onto the USB as `assets/`:

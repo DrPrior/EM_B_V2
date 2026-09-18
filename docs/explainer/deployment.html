@@ -67,7 +67,7 @@
 <table>
   <thead><tr><th>Concern</th><th>Where it lives</th><th>Consequence</th></tr></thead>
   <tbody>
-    <tr><td>Neo4j</td><td>Native server, its own data directory</td><td>Graph survives a restart; the version is pinned (2026.07.x) so exported snapshots load elsewhere</td></tr>
+    <tr><td>Neo4j</td><td>Native server, its own data directory</td><td>Graph survives a restart; the version is pinned (2026.08.x) so exported snapshots load elsewhere</td></tr>
     <tr><td>API</td><td>Native process — <code>uvicorn --reload</code> in dev, a frozen exe when shipped</td><td>In dev, save a <code>.py</code> and it restarts in seconds</td></tr>
     <tr><td>Ollama</td><td>Host, native install</td><td>Started by the shell; the app waits for it in code before serving</td></tr>
     <tr><td>Model definitions</td><td><code>Modelfile</code> / <code>Modelfile.embeddings</code></td><td>Kept next to the app and read at startup, so edits apply on the next bootstrap</td></tr>
@@ -404,7 +404,7 @@ pytest</code></pre>
   <a class="ref" href="../../scripts/export-graph.ps1">export-graph.ps1</a> and
   <a class="ref" href="../../scripts/import-graph.ps1">import-graph.ps1</a> drive native
   <code>neo4j-admin</code> to move a graph snapshot between machines — which is why the Neo4j version is
-  pinned (2026.07.x) rather than floating, since the store format must match on both ends. It must also
+  pinned (2026.08.x) rather than floating, since the store format must match on both ends. It must also
   match the <em>edition</em>: Community cannot load an Enterprise <code>block</code>-format dump.
   <a class="ref" href="../../scripts/verify-arc-gpu.ps1">verify-arc-gpu.ps1</a> confirms Intel Arc
   acceleration is actually being used. (<code>harden-ollama-firewall.ps1</code> is retired, kept only for

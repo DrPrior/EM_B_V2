@@ -98,8 +98,11 @@ password **survives a second call** — it is baked into the store on first run,
 regenerating it would lock the app out of its own graph.
 
 `test/snapshot.test.js` covers the import-once marker, including the cases that
-must force a re-import: a marker naming a different Neo4j home (relocated
-install) and a legacy marker with no `dataDir`.
+must force a re-import (a marker naming a different Neo4j home, and a legacy
+marker with no `dataDir`), plus the load→migrate sequence: that `migrate` is
+called after `load` and **without** `--to-format` (which would risk an
+Enterprise-only store), that a failed `load` is fatal and leaves no marker, and
+that a failed `migrate` is reported but does not abort the import.
 
 `test/electron-stub.js` is a helper, not a suite: it seeds the module cache so
 `require('electron')` yields a fake `app`, which is what lets modules reaching
@@ -277,11 +280,17 @@ userData dir: `first-run-complete.json`, `graph-imported.json`,
   `envfile.js` hands the children `NEO4J_AUTH`, `DB_URI=bolt://127.0.0.1:7687`
   and `DATA_ROOT` as **process env**. Neo4j and the API bind `127.0.0.1` only.
 - **Graph**: the snapshot is loaded offline (Neo4j stopped) with the bundled
-  `neo4j-admin database load` — the slow ingest/enrich pipeline is skipped
+  `neo4j-admin database load`, then `database migrate` brings the store up to the
+  bundled server's format version — the slow ingest/enrich pipeline is skipped
   entirely. The marker records the target data dir, so a relocated install
-  re-imports instead of coming up empty. The dump's store format must match the
-  bundled Neo4j line (`2026.07.x`) **and** be a Community-loadable record/aligned
-  dump, not Enterprise `block` — re-export if you change either.
+  re-imports instead of coming up empty.
+
+  The migrate is a **backstop, not the mechanism**: it costs about a second when
+  there is nothing to do, and it is deliberately non-fatal, because the server
+  start moments later is the real verdict. The dump you ship should already be at
+  the bundled server's format version — that is what
+  `scripts/stage-neo4j.ps1 -ReExport` produces. It must also be a
+  Community-loadable record/aligned dump, never Enterprise `block`.
 
 ## Verification (per plan)
 

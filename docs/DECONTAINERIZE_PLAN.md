@@ -173,9 +173,19 @@ shipped must be signed or installer-free.
   re-export, since a future `neo4j-admin database dump` on a block-format store
   would silently produce an unloadable artifact.
 - First-run order: `neo4j-admin dbms set-initial-password <random>` **before** the
-  first start → `neo4j-admin database load` the dump (offline) → `neo4j console`.
-  Password-before-init is mandatory or auth breaks (same trap the Docker volume had).
-  This is what `lib/firstrun.js` + `lib/snapshot.js` already do.
+  first start → `neo4j-admin database load` the dump (offline) → `database migrate`
+  → `neo4j console`. Password-before-init is mandatory or auth breaks (same trap
+  the Docker volume had). This is what `lib/firstrun.js` + `lib/snapshot.js` do.
+- **Ship a dump that is already at the bundled server's format version.**
+  `lib/snapshot.js` loads the dump and the server then starts; the `migrate` call
+  it makes is a non-fatal backstop, not something to rely on. If the bundled
+  Neo4j is a different release from the one the dump was taken on, produce the
+  shipped dump with `scripts/stage-neo4j.ps1 -ReExport`, which loads, migrates,
+  dumps back out, and verifies the **re-exported** file's store format. Getting
+  this wrong fails on the user's machine after a multi-GB unpack.
+- Staging both homes is `scripts/stage-neo4j.ps1` — it unpacks the Neo4j and JRE
+  zips, applies the loopback/memory settings, and can set the password and load
+  the dump, so `-Neo4jHome` / `-JreHome` are reproducible rather than hand-made.
 - Config the zipped Neo4j home before staging it: bind bolt + http to `127.0.0.1`;
   data dir + modest heap/pagecache under the app's userData dir.
 - JRE licensing: take it from Adoptium or Azul directly so it is yours to

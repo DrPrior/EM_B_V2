@@ -91,3 +91,97 @@ test('importSnapshot skips without touching neo4j-admin when already imported', 
 
   assert.deepEqual(lines, ['Graph already imported — skipping.']);
 });
+
+// --- load + migrate ---------------------------------------------------------
+
+/** Put a dump where importSnapshot expects one. */
+function placeDump() {
+  fs.mkdirSync(paths.snapshotDir(), { recursive: true });
+  fs.writeFileSync(snapshot.dumpPath(), 'not a real archive');
+}
+
+/** A fake runStream recording each neo4j-admin invocation. */
+function recorder(codes = {}) {
+  const calls = [];
+  const runStream = async (exe, args) => {
+    calls.push({ exe, args, subcommand: args.slice(0, 2).join(' ') });
+    const code = codes[args.slice(0, 2).join(' ')] ?? 0;
+    if (code === 'throw') throw new Error('spawn ENOENT');
+    return { code };
+  };
+  return { runStream, calls };
+}
+
+test('importSnapshot loads and then migrates, in that order', async () => {
+  placeDump();
+  const { runStream, calls } = recorder();
+
+  await snapshot.importSnapshot(null, () => {}, { runStream });
+
+  assert.deepEqual(calls.map((c) => c.subcommand), ['database load', 'database migrate']);
+  assert.ok(calls[0].args.includes('--overwrite-destination=true'));
+  assert.ok(calls[0].args.includes(`--from-path=${paths.snapshotDir()}`));
+});
+
+test('migrate is called without --to-format, so the store stays Community-loadable', async () => {
+  placeDump();
+  const { runStream, calls } = recorder();
+
+  await snapshot.importSnapshot(null, () => {}, { runStream });
+
+  const migrate = calls.find((c) => c.subcommand === 'database migrate');
+  assert.deepEqual(migrate.args, ['database', 'migrate', 'neo4j']);
+  // --to-format=block would produce an Enterprise-only store the bundled
+  // Community server cannot open.
+  assert.equal(migrate.args.some((a) => String(a).startsWith('--to-format')), false);
+});
+
+test('a failed load is fatal and leaves no marker', async () => {
+  placeDump();
+  const { runStream, calls } = recorder({ 'database load': 1 });
+
+  await assert.rejects(
+    () => snapshot.importSnapshot(null, () => {}, { runStream }),
+    /neo4j-admin database load failed/,
+  );
+  assert.equal(calls.length, 1, 'must not migrate after a failed load');
+  assert.equal(fs.existsSync(MARKER), false, 'a failed import must be retried next launch');
+});
+
+test('a failed migrate is reported but not fatal', async () => {
+  placeDump();
+  const lines = [];
+  const { runStream } = recorder({ 'database migrate': 1 });
+
+  await snapshot.importSnapshot(null, (l) => lines.push(l), { runStream });
+
+  // The server start is the real verdict; failing here would turn a recoverable
+  // state into a dead first run.
+  assert.ok(lines.some((l) => /migration exited 1/.test(l)));
+  assert.ok(lines.some((l) => /does not match the bundled Neo4j version/.test(l)));
+  assert.ok(fs.existsSync(MARKER), 'the graph did load, so the import counts as done');
+});
+
+test('a migrate that cannot even spawn is caught, not thrown', async () => {
+  placeDump();
+  const lines = [];
+  const { runStream } = recorder({ 'database migrate': 'throw' });
+
+  await snapshot.importSnapshot(null, (l) => lines.push(l), { runStream });
+
+  assert.ok(lines.some((l) => /migration could not run \(spawn ENOENT\)/.test(l)));
+  assert.ok(fs.existsSync(MARKER));
+});
+
+test('the marker records the data dir so a relocated install re-imports', async () => {
+  placeDump();
+  const { runStream } = recorder();
+
+  await snapshot.importSnapshot(null, () => {}, { runStream });
+
+  const marker = JSON.parse(fs.readFileSync(MARKER, 'utf8'));
+  assert.equal(marker.dataDir, paths.neo4jHomeDir());
+  assert.equal(marker.database, 'neo4j');
+  assert.match(marker.importedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(snapshot.alreadyImported(), true);
+});

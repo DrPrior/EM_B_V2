@@ -19,10 +19,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >   supervisor + first-run), E (freeze spec + build/release scripts). `lib/docker.js`
 >   and `lib/compose.js` are deleted; [electron/lib/procs.js](electron/lib/procs.js) spawns Neo4j and the
 >   frozen API directly.
-> - **Remaining is artifact work, not code:** Workstream C — stage a **Community**
->   Neo4j `2026.07.x` home plus a redistributable JRE for `build-release.ps1`
->   (`-Neo4jHome` / `-JreHome`); neither exists yet. Then code-signing (no UALR
->   cert yet) and a clean-machine first-run test.
+> - **Workstream C is staged:** Neo4j Community **2026.08.1** at `C:\stage\neo4j`
+>   and Temurin **JRE 21** at `C:\stage\jre` (via `scripts/stage-neo4j.ps1`), and
+>   `release/neo4j.dump` re-exported and verified loadable by that Community
+>   server. **Remaining:** run `build-release.ps1` → installer → USB, then
+>   code-signing (no UALR cert yet) and a clean-machine first-run test.
 > - **The shipped dump is fine.** `release/neo4j.dump` is verified
 >   `record-aligned-1.1`, so Community can load it, even though dev runs
 >   Enterprise (whose `block` default it cannot). `backup-block/neo4j.dump` is the
@@ -131,7 +132,7 @@ notebook stack into the bundle.
 configure for loopback, optionally set the password and load the graph dump):
 ```powershell
 pwsh -File scripts/stage-neo4j.ps1 -Zip <neo4j-community-*.zip> -JreZip <jre.zip> `
-     -Password <pw> -Dump .\release\neo4j.dump
+     -Dump .\release\neo4j.dump -ReExport
 ```
 Neo4j Community downloads live at `https://dist.neo4j.org/neo4j-community-<version>-windows.zip`
 (plus `.sha256`). The Deployment Center UI lists **only the newest release**, so
@@ -140,7 +141,8 @@ fetch older lines by direct URL rather than assuming they're gone.
 **Build the release assets** (frozen API + Neo4j + JRE + dump + corpus, then
 checksums into `electron/resources/assets.manifest.json`):
 ```powershell
-pwsh -File electron/scripts/build-release.ps1 -Neo4jHome <dir> -JreHome <dir>
+pwsh -File electron/scripts/build-release.ps1 -Neo4jHome C:\stage\neo4j -JreHome C:\stage\jre `
+     -Python "$env:USERPROFILE\.conda\envs\pyAI\python.exe"   # NOT the system python on PATH
 cd electron; npm run dist:win          # bakes the manifest into the installer
 pwsh -File scripts/stage-usb.ps1 -Verify
 ```
@@ -488,6 +490,6 @@ These conventions are enforced across the codebase. Follow them in all new code.
 - Startup order the shell must enforce: Neo4j (native server + bundled JRE) → wait for bolt → API (uvicorn now, frozen exe later) → poll `/health`. Ollama is host-native and only needs to be ensured running.
 - All endpoints bind `127.0.0.1` only. (`api_server.py` is a legacy alternate entry point that still binds `0.0.0.0` — don't use it; prefer `scripts/dev-up.ps1`.)
 - GPU acceleration comes entirely from the host's native Ollama install. The app has no GPU code of its own.
-- **Neo4j version is store-format-locked to `2026.07.01`** (the line the current graph was built on). A different major line can refuse to open the store — see the pitfall list in [docs/DECONTAINERIZE_PLAN.md](docs/DECONTAINERIZE_PLAN.md). Set the Neo4j password **before first init** (`neo4j-admin dbms set-initial-password`); it is baked into the data dir.
+- **The shipped Neo4j is Community `2026.08.1`**, and the shipped dump must be at its store format (currently `record-aligned-1.1`). Dev runs Enterprise `2026.07.1`; moving between lines means `stage-neo4j.ps1 -Dump … -ReExport` (load → `migrate` → re-dump → verify). See the pitfall list in [docs/DECONTAINERIZE_PLAN.md](docs/DECONTAINERIZE_PLAN.md). Set the Neo4j password **before first init** (`neo4j-admin dbms set-initial-password`); it is baked into the data dir.
 - **Shipping the runtimes (open decision):** recommended — freeze the API with PyInstaller (one-dir) and code-sign it; ship native Neo4j + a bundled JRE unpacked. Installer signing is staged but blocked on a UALR certificate.
 - All credentials via `.env` / environment — never hardcoded secrets.

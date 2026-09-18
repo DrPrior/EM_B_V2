@@ -45,7 +45,11 @@
     Output directory. Defaults to <repo>/release. Copy onto the USB as `assets`.
 
 .PARAMETER Python
-    Python interpreter used to run PyInstaller. Defaults to "python".
+    Python interpreter used to run PyInstaller. Must be the environment that has
+    the app's runtime deps AND PyInstaller (on the maintainer box: the pyAI conda
+    env). Defaults to the active conda env's python if one is activated, else
+    "python" — which on a machine with a system Python on PATH is usually the
+    wrong one. The script checks before freezing and says so.
 
 .PARAMETER CertSubject
     If given, code-sign emb-api.exe with this certificate subject via signtool
@@ -53,7 +57,8 @@
     shipped UNSIGNED and the script warns — WDAC will block it on the fleet.
 
 .EXAMPLE
-    pwsh -File electron/scripts/build-release.ps1 -Neo4jHome C:\stage\neo4j -JreHome C:\stage\jre
+    pwsh -File electron/scripts/build-release.ps1 -Neo4jHome C:\stage\neo4j -JreHome C:\stage\jre `
+      -Python "$env:USERPROFILE\.conda\envs\pyAI\python.exe"
 #>
 [CmdletBinding()]
 param(
@@ -62,7 +67,7 @@ param(
     [string]$DumpPath,
     [string]$Version,
     [string]$OutDir,
-    [string]$Python = "python",
+    [string]$Python = $(if ($env:CONDA_PREFIX) { Join-Path $env:CONDA_PREFIX "python.exe" } else { "python" }),
     [string]$CertSubject
 )
 
@@ -87,6 +92,31 @@ function Compress-Contents([string]$SourceDir, [string]$Dest) {
     if (Test-Path $Dest) { Remove-Item $Dest -Force }
     Compress-Archive -Path (Join-Path $SourceDir '*') -DestinationPath $Dest -Force
 }
+
+# ── 0. Preflight: is $Python the app's environment? ─────────────────────────
+# Two failure modes, one silent. A Python without PyInstaller fails loudly but
+# unhelpfully. A Python WITH PyInstaller but without the app's deps is worse:
+# PyInstaller only warns about unresolvable imports, so the freeze "succeeds"
+# and ships a bundle that dies on first launch. Importing the app itself checks
+# exactly what the freeze will pull in; the parsers are named too because the
+# ingest pipeline imports them lazily, inside functions.
+Write-Host "==> [0/5] Checking the Python environment ($Python) ..." -ForegroundColor Cyan
+if (-not (Get-Command $Python -ErrorAction SilentlyContinue)) {
+    throw "Python not found: '$Python'. Pass -Python <env>\python.exe (on this machine, the pyAI conda env)."
+}
+$pyiVersion = & $Python -m PyInstaller --version 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw ("'$Python' has no PyInstaller. Pass -Python pointing at the app's environment, e.g.`n" +
+           "  -Python `"$env:USERPROFILE\.conda\envs\pyAI\python.exe`"`n" +
+           "or install it there: <that python> -m pip install -r requirements-dev.txt")
+}
+$probe = & $Python -c "import src.main, pypdf, docx, pptx, cryptography" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    $why = ($probe | Select-Object -Last 1)
+    throw ("'$Python' cannot import the app ($why). Freezing from it would ship a broken " +
+           "bundle. Use the environment the API runs in (-Python <env>\python.exe).")
+}
+Write-Host "    PyInstaller $pyiVersion; app imports OK" -ForegroundColor DarkGray
 
 # ── 1. Freeze the API (PyInstaller one-dir) ─────────────────────────────────
 Write-Host "==> [1/5] Freezing the API (pyinstaller emb-api.spec) ..." -ForegroundColor Cyan

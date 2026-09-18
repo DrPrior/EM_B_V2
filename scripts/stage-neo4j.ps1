@@ -52,6 +52,20 @@
     resulting format is printed — which is the check that it stayed in the
     Community-loadable `aligned` family.
 
+.PARAMETER ReExport
+    After migrating, dump the store back out so the SHIPPED artifact is already
+    at the bundled server's format version.
+
+    This is required, not cosmetic, whenever the bundled Neo4j is a different
+    release from the one the dump was taken on: electron/lib/snapshot.js runs
+    `database load` and then starts the server, so a dump that still needs
+    migrating would fail on the user's machine after a multi-GB unpack.
+
+    The previous dump is preserved as neo4j.dump.pre-migration (never
+    overwritten on a re-run), and the re-exported dump is then verified by
+    loading it into a throwaway data directory and reading its store format —
+    so what gets checked is the artifact that ships, not the store it came from.
+
 .PARAMETER HeapSize
     JVM heap. Default 1g.
 
@@ -62,7 +76,10 @@
     pwsh -File scripts/stage-neo4j.ps1 `
       -Zip C:\Downloads\neo4j-community-2026.08.1-windows.zip `
       -JreZip C:\Downloads\OpenJDK21U-jre_x64_windows_hotspot.zip `
-      -Password devpassword -Dump .\release\neo4j.dump
+      -Password devpassword -Dump .\release\neo4j.dump -ReExport
+
+    Stage both homes, load the graph, migrate it to the bundled server's format,
+    and write the migrated dump back to release\ ready for build-release.ps1.
 
 .EXAMPLE
     # Re-apply settings to an already-staged home
@@ -77,6 +94,7 @@ param(
     [string]$StageDir = "C:\stage",
     [string]$Password,
     [string]$Dump,
+    [switch]$ReExport,
     [string]$HeapSize = "1g",
     [string]$PageCacheSize = "512m"
 )
@@ -141,6 +159,39 @@ function Invoke-Admin([string]$AdminPath, [string]$JavaHome, [string[]]$Argument
         if ($LASTEXITCODE -ne 0) { throw "neo4j-admin $($Arguments -join ' ') failed (exit $LASTEXITCODE)." }
     } finally {
         $env:JAVA_HOME = $prev
+    }
+}
+
+<#
+    Read a DUMP's store format, by loading it into a throwaway data directory.
+
+    There is no way to ask a dump directly: `database load --info` reports the
+    ARCHIVE format ("Neo4j ZSTD Dump") and never the store format, and
+    `database info --from-path` wants an unpacked store. So unpack a copy
+    somewhere disposable and inspect that.
+#>
+function Get-DumpStoreFormat([string]$AdminPath, [string]$JavaHome, [string]$DumpDir) {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("verify-" + [guid]::NewGuid().ToString().Substring(0, 8))
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    try {
+        $cfg = Join-Path $tmp "verify.conf"
+        $posix = $tmp.Replace('\', '/')
+        Set-Content -Path $cfg -Encoding ascii -Value @(
+            "server.directories.data=$posix/data",
+            "server.directories.transaction.logs.root=$posix/tx"
+        )
+        Invoke-Admin $AdminPath $JavaHome @(
+            "database", "load", "neo4j", "--from-path=$DumpDir", "--additional-config=$cfg"
+        ) | Out-Null
+        $info = & {
+            $prev = $env:JAVA_HOME; $env:JAVA_HOME = $JavaHome
+            try { & $AdminPath database info --from-path="$tmp\data\databases" neo4j 2>&1 } finally { $env:JAVA_HOME = $prev }
+        }
+        $line = $info | Where-Object { $_ -match 'Store format version' } | Select-Object -First 1
+        if ($line) { return ($line -split ':', 2)[1].Trim() }
+        return "(could not read store format)"
+    } finally {
+        if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -217,6 +268,35 @@ if ($Dump) {
     Write-Host ""
     Write-Host "Confirm the format above is an 'aligned' (record) one. 'block' means" -ForegroundColor Yellow
     Write-Host "Enterprise-only and the desktop app's Community server cannot load it." -ForegroundColor Yellow
+
+    # ── 4b. Re-export, so the artifact that SHIPS is already migrated ───────
+    if ($ReExport) {
+        # snapshot.js loads the dump and starts the server; it cannot be relied
+        # on to migrate. So the shipped dump must already match the bundled
+        # server, or first run dies after a multi-GB unpack.
+        $backup = Join-Path $dumpDir "neo4j.dump.pre-migration"
+        if (-not (Test-Path $backup)) {
+            Write-Host "==> Preserving the pre-migration dump -> $backup" -ForegroundColor Cyan
+            Copy-Item (Join-Path $dumpDir "neo4j.dump") $backup
+        } else {
+            Write-Host "==> Keeping the existing $([IO.Path]::GetFileName($backup)) (not overwriting it)." -ForegroundColor DarkGray
+        }
+
+        Write-Host "==> Re-exporting the migrated store -> $dumpDir\neo4j.dump" -ForegroundColor Cyan
+        Invoke-Admin $admin $JreHome @(
+            "database", "dump", "neo4j", "--to-path=$dumpDir", "--overwrite-destination=true"
+        )
+
+        Write-Host "==> Verifying the RE-EXPORTED dump (the file that ships) ..." -ForegroundColor Cyan
+        $format = Get-DumpStoreFormat $admin $JreHome $dumpDir
+        Write-Host "    Store format version: $format" -ForegroundColor Green
+        if ($format -match 'block') {
+            throw "The re-exported dump is '$format' — Enterprise-only. The bundled Community server cannot load it."
+        }
+        if ($format -notmatch 'aligned|standard') {
+            Write-Warning "Unrecognized store format '$format'. Confirm Community can load it before shipping."
+        }
+    }
 }
 
 # ── 5. What to do next ──────────────────────────────────────────────────────

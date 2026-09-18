@@ -111,6 +111,18 @@ if (-not $JreZip -and -not $JreHome) { throw "Pass -JreZip (a downloaded JRE zip
 # layout contract has no such level (<userData>/neo4j/bin/...), so unwrap it.
 function Expand-Flattened([string]$Archive, [string]$Dest, [string]$What) {
     if (-not (Test-Path $Archive)) { throw "$What archive not found: $Archive" }
+
+    # Both vendors offer installers next to the archives, and the installer is
+    # the more prominent download. tar would fail on one with a useless message.
+    $ext = [IO.Path]::GetExtension($Archive).ToLowerInvariant()
+    if ($ext -in @('.msi', '.exe')) {
+        throw ("$What is an installer ($ext), not an archive: $Archive`n" +
+               "       This ships as an unpacked folder, so download the .zip build instead. " +
+               "For the JRE: https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse")
+    }
+    if ($ext -notin @('.zip', '.gz', '.tgz', '.tar')) {
+        Write-Warning "$What has an unexpected extension '$ext'; expected .zip."
+    }
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("stage-" + [guid]::NewGuid().ToString().Substring(0, 8))
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     try {
@@ -256,6 +268,23 @@ if (-not (Test-Path $java))  { throw "$JreHome does not look like a JRE home (no
 # A JDK works but is ~120 MB of compiler the app never uses; flag it, don't fail.
 if (Test-Path (Join-Path $JreHome "bin\javac.exe")) {
     Write-Warning "$JreHome is a JDK, not a JRE. It works, but ships a compiler you don't need."
+}
+
+# Neo4j 2026.x is built and tested on Java 17/21 — Neo4j Desktop bundles only
+# those, and the dev server runs 21. A JVM outside that range may refuse to run
+# the server, and finding that out on a user's machine is the expensive way.
+$javaMajor = 0
+$verText = (& $java -version 2>&1 | Out-String)
+if ($verText -match 'version "(\d+)') { $javaMajor = [int]$Matches[1] }
+if ($javaMajor -eq 0) {
+    Write-Warning "Could not read a Java version from $java."
+} elseif ($javaMajor -lt 17) {
+    throw "$JreHome is Java $javaMajor. Neo4j 2026.x needs 17 or 21 — use Temurin/Zulu JRE 21."
+} elseif ($javaMajor -gt 21) {
+    Write-Warning ("$JreHome is Java $javaMajor. Neo4j 2026.x ships and tests on 17/21 (this machine's " +
+                   "Neo4j runs 21). If the server or neo4j-admin misbehaves, drop to JRE 21 first.")
+} else {
+    Write-Host "Java: $javaMajor (supported)" -ForegroundColor Green
 }
 
 Write-Host "Neo4j home: $Neo4jHome" -ForegroundColor Green

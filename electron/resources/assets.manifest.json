@@ -3,23 +3,23 @@
   "version": "0.4.0",
   "apiBundle": {
     "file": "emb-api.zip",
-    "sha256": ""
+    "sha256": "080c492f7e9bd7f9587fb2e61d5f3db9a1d48e251bb7465d03e20c247b6feea7"
   },
   "neo4j": {
     "file": "neo4j-community.zip",
-    "sha256": ""
+    "sha256": "af9b0f52d885310b05882497806a7df5bee99e4cbef5776b34ddace7f2f90376"
   },
   "jre": {
     "file": "jre.zip",
-    "sha256": ""
+    "sha256": "d84cb732b45ec8a88b53e4b814eea0f2376f4001af38d88a6e4af5e25a955fb7"
   },
   "snapshot": {
     "file": "neo4j.dump",
-    "sha256": ""
+    "sha256": "cb5ba3d473190f2bf94337afd80bb8abd82f9e40119702271bdd398e1b58c2a2"
   },
   "projectData": {
     "file": "project_data.tar.gz",
-    "sha256": ""
+    "sha256": "063134fc8df5c55fe718e55e3d2982b694350782be6231e604dccc9dc2725cbb"
   },
   "ollama": {
     "win32": "https://ollama.com/download/OllamaSetup.exe",

@@ -19,6 +19,8 @@
         VRAM/RAM on a laptop, so it must not assume the machine to itself. The
         graph store is ~140 MB, so a 512 MB page cache holds all of it.
       * https off — there is no certificate and no remote client.
+      * usage reporting and Browser telemetry off — Neo4j defaults both on, and
+        the app promises that nothing leaves the machine.
 
     The data directory is left at its default (<neo4j-home>/data), which is what
     electron/lib/paths.js resolves to once the zip is unpacked to <userData>/neo4j.
@@ -301,6 +303,12 @@ $settings = [ordered]@{
     "server.memory.heap.initial_size" = $HeapSize
     "server.memory.heap.max_size"     = $HeapSize
     "server.memory.pagecache.size"    = $PageCacheSize
+    # Neo4j defaults both of these ON. The first periodically sends anonymous
+    # usage statistics to Neo4j; the second lets the bundled Neo4j Browser send
+    # its own telemetry. The app promises users that nothing leaves the machine,
+    # so both are off.
+    "dbms.usage_report.enabled"       = "false"
+    "client.allow_telemetry"          = "false"
 }
 foreach ($k in $settings.Keys) {
     Set-Neo4jSetting $conf $k $settings[$k]

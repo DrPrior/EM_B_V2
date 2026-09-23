@@ -30,7 +30,7 @@
   One question, traced from the browser's <code>fetch</code> to the last streamed token. Streaming and
   non-streaming chat share the entire retrieval path — they diverge only at the final Ollama call.
   Everything below happens in
-  <a class="ref" href="../../src/services/rag.py">src/services/rag.py:111</a>.
+  <a class="ref" href="../../src/services/rag.py">src/services/rag.py:120</a>.
 </p>
 
 <h2>End to end</h2>
@@ -154,24 +154,24 @@
     <a class="ref" href="../../src/services/embeddings.py">embeddings.py:8</a> POSTs to
     <code>/api/embeddings</code>. This is the one step that is <em>not</em> allowed to fail — an
     exception here becomes an HTTP 500
-    (<a class="ref" href="../../src/services/rag.py">rag.py:129</a>).
+    (<a class="ref" href="../../src/services/rag.py">rag.py:142</a>).
   </li>
   <li>
     <strong>Vector search</strong>
-    <code>_VECTOR_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:69</a>) asks the
+    <code>_VECTOR_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:78</a>) asks the
     index for <code>retrieval_top_k</code> nearest chunks, then <code>OPTIONAL MATCH</code>es back up to
     the owning File and collects any File that <code>SUPERSEDES</code> it.
   </li>
   <li>
     <strong>Extract entities from the question</strong>
     The same <code>extract_entities</code> the enrichment pipeline uses
-    (<a class="ref" href="../../pipeline/extract.py">extract.py:75</a>), now applied to the user's
+    (<a class="ref" href="../../pipeline/extract.py">extract.py:78</a>), now applied to the user's
     text. Concepts and organisation names are flattened into one list; legal references stay separate
     because they are matched against a different edge type.
   </li>
   <li>
     <strong>Graph traversal</strong>
-    <code>_GRAPH_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:80</a>) finds
+    <code>_GRAPH_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:89</a>) finds
     chunks that <code>MENTIONS</code> a matching Concept/Organization or <code>CITES</code> a matching
     LegalReference — case-insensitively — then rescores each with
     <code>vector.similarity.cosine()</code> against the question vector and keeps the best few above
@@ -185,7 +185,7 @@
     <strong>Assemble the prompt and call the model</strong>
     <code>[system] + history + [user with context]</code>, then either
     <code>generate_chat_response</code> or <code>generate_chat_stream</code>
-    (<a class="ref" href="../../src/services/llm.py">llm.py:48</a>).
+    (<a class="ref" href="../../src/services/llm.py">llm.py:54</a>).
   </li>
 </ol>
 
@@ -201,7 +201,7 @@
 
   <rect x="30" y="20" width="330" height="76" rx="8" class="d-accent"/>
   <text x="195" y="46" class="d-t sm b d-c">VECTOR RESULTS</text>
-  <text x="195" y="66" class="d-m d-c">nearest retrieval_top_k = 5 chunks</text>
+  <text x="195" y="66" class="d-m d-c">nearest retrieval_top_k = 3 chunks</text>
   <text x="195" y="84" class="d-m xs d-c">ranked by the index, no entity involvement</text>
 
   <rect x="520" y="20" width="330" height="76" rx="8" class="d-violet"/>
@@ -217,7 +217,7 @@
   <text x="195" y="172" class="d-m xs d-c">vector_retrieval_min_score, applied in Python</text>
 
   <rect x="550" y="130" width="270" height="56" rx="8" class="d-amber"/>
-  <text x="685" y="153" class="d-t sm b d-c">score ≥ 0.78, LIMIT 3</text>
+  <text x="685" y="153" class="d-t sm b d-c">score ≥ 0.78, LIMIT 2</text>
   <text x="685" y="172" class="d-m xs d-c">applied inside the Cypher query</text>
 
   <path d="M 195 190 C 195 226, 330 218, 400 232" class="d-arrow" marker-end="url(#f-ah)"/>
@@ -235,7 +235,7 @@
   <text x="440" y="375" class="d-m xs d-c">order is preserved into both the prompt context and the sources array returned to the UI</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../src/services/rag.py">rag.py:170</a>. Note the asymmetry: the vector floor
+  <a class="ref" href="../../src/services/rag.py">rag.py:190</a>. Note the asymmetry: the vector floor
   is enforced in Python <em>after</em> the query returns, so <code>top_k</code> results are always
   fetched and some may be discarded; the graph floor is pushed down into Cypher.
 </figcaption>
@@ -244,10 +244,10 @@
 <div class="note">
   <strong>Tuning knobs</strong>
   <p>
-    All four values live in <a class="ref" href="../../src/core/config.py">config.py:85</a> and are
-    overridable from <code>.env</code>: <code>retrieval_top_k</code> (5),
+    All four values live in <a class="ref" href="../../src/core/config.py">config.py:111</a> and are
+    overridable from <code>.env</code>: <code>retrieval_top_k</code> (3),
     <code>vector_retrieval_min_score</code> (0.75), <code>graph_retrieval_min_score</code> (0.78),
-    <code>graph_retrieval_limit</code> (3). Raising the floors trades recall for precision; the graph
+    <code>graph_retrieval_limit</code> (2). Raising the floors trades recall for precision; the graph
     floor is set higher than the vector floor on purpose, because entity-linked chunks arrive without
     the index's own ranking to vouch for them.
   </p>
@@ -284,8 +284,8 @@
   <text x="20" y="410" class="d-m">If nothing survived the score floors, the context block is replaced by an explicit instruction to say so rather than guess.</text>
 </svg>
 <figcaption>
-  Built at <a class="ref" href="../../src/services/rag.py">rag.py:217</a>. The delimiters are constants
-  at <a class="ref" href="../../src/services/rag.py">rag.py:18</a> and are named in the system prompt
+  Built at <a class="ref" href="../../src/services/rag.py">rag.py:246</a>. The delimiters are constants
+  at <a class="ref" href="../../src/services/rag.py">rag.py:22</a> and are named in the system prompt
   itself, so the two can never drift apart.
 </figcaption>
 </figure>
@@ -293,7 +293,7 @@
 <h2>Streaming</h2>
 
 <p>
-  <code>stream_answer</code> (<a class="ref" href="../../src/services/rag.py">rag.py:270</a>) runs
+  <code>stream_answer</code> (<a class="ref" href="../../src/services/rag.py">rag.py:305</a>) runs
   retrieval <em>synchronously</em> and returns a generator. That ordering is what lets the router emit a
   <code>metadata</code> event containing the sources before the first token exists — the UI can render
   the citation panel while the model is still thinking.
@@ -335,7 +335,7 @@
   <text x="30" y="234" class="d-m">An <tspan class="d-t sm mono">error</tspan> event replaces the remaining tokens if generation fails mid-response; the client stops reading on it.</text>
 </svg>
 <figcaption>
-  Emitted by <a class="ref" href="../../src/routers/chat.py">chat.py:172</a>, consumed by
+  Emitted by <a class="ref" href="../../src/routers/chat.py">chat.py:176</a>, consumed by
   <a class="ref" href="../../src/static/app.js">app.js:148</a>.
 </figcaption>
 </figure>
@@ -345,7 +345,7 @@
 <p>
   <strong>History survives a disconnect.</strong> The token generator accumulates tokens in a list and
   stores the turn inside a <code>finally</code>
-  (<a class="ref" href="../../src/services/rag.py">rag.py:298</a>). Whether the client reads every token
+  (<a class="ref" href="../../src/services/rag.py">rag.py:333</a>). Whether the client reads every token
   or closes the tab halfway, whatever was generated lands in the session history — so a follow-up
   question still has context.
 </p>
@@ -367,7 +367,7 @@
 <ol>
   <li>
     Each source carries a <code>url</code> built by
-    <a class="ref" href="../../src/services/rag.py">rag.py:49</a>, which strips
+    <a class="ref" href="../../src/services/rag.py">rag.py:53</a>, which strips
     <code>settings.data_root</code> off the stored filepath and percent-encodes the remainder into
     <code>/files/&lt;relative path&gt;</code>. Catalogue-only entries get a URL too — the endpoint just
     404s.

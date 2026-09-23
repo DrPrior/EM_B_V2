@@ -40,8 +40,8 @@
   <p>
     Docker was removed (UALR no longer permits it): Neo4j and the API run as <strong>native host
     processes</strong>, and Ollama always did. The code migration is complete, including the Electron
-    shell and the build scripts; what remains is release-artifact work (staging a Community Neo4j and a
-    JRE, code-signing, a clean-machine test). The canonical plan is
+    shell and the build scripts, and release 0.4.0 has been built. What remains is code-signing, a
+    clean-machine test, and one known 0.4.0 bug (citation links fail on end-user machines; see the plan). The canonical plan is
     <a class="ref" href="../../docs/DECONTAINERIZE_PLAN.md">docs/DECONTAINERIZE_PLAN.md</a>; the developer
     runbook is <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>.
   </p>
@@ -50,7 +50,7 @@
 <div class="note">
   <strong>How to read this explainer</strong>
   <p>
-    Every <a class="ref" href="../../src/services/rag.py">src/services/rag.py:111</a>-style chip is a
+    Every <a class="ref" href="../../src/services/rag.py">src/services/rag.py:120</a>-style chip is a
     link to the real file in this repository, relative to these pages. The number after the colon is
     the line where the thing being described starts. Open a page from the repo checkout
     (<code>docs/explainer/index.html</code>) so the links resolve.
@@ -218,7 +218,7 @@
 <figcaption>
   The build lane is idempotent at every stage — rerunning it skips work already done. The query lane
   never writes: its Neo4j session is opened in <code>READ_ACCESS</code> mode so the server rejects an
-  accidental write (<a class="ref" href="../../src/routers/chat.py">src/routers/chat.py:100</a>).
+  accidental write (<a class="ref" href="../../src/routers/chat.py">src/routers/chat.py:102</a>).
 </figcaption>
 </figure>
 
@@ -231,22 +231,22 @@
     <tr>
       <td><code>src/main.py</code></td>
       <td>App construction, lifespan startup/shutdown, router wiring, static UI mount</td>
-      <td><a class="ref" href="../../src/main.py">main.py:21</a></td>
+      <td><a class="ref" href="../../src/main.py">main.py:26</a></td>
     </tr>
     <tr>
       <td><code>src/routers/</code></td>
       <td>HTTP surface — <code>chat</code>, <code>graph</code>, <code>admin</code>, <code>files</code></td>
-      <td><a class="ref" href="../../src/routers/chat.py">chat.py:108</a></td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:110</a></td>
     </tr>
     <tr>
       <td><code>src/services/rag.py</code></td>
       <td>The retrieval pipeline and prompt assembly — the heart of the app</td>
-      <td><a class="ref" href="../../src/services/rag.py">rag.py:111</a></td>
+      <td><a class="ref" href="../../src/services/rag.py">rag.py:120</a></td>
     </tr>
     <tr>
       <td><code>src/services/llm.py</code>, <code>embeddings.py</code></td>
       <td>Thin HTTP clients for Ollama's <code>/api/chat</code>, <code>/api/generate</code>, <code>/api/embeddings</code></td>
-      <td><a class="ref" href="../../src/services/llm.py">llm.py:48</a></td>
+      <td><a class="ref" href="../../src/services/llm.py">llm.py:54</a></td>
     </tr>
     <tr>
       <td><code>src/services/session.py</code></td>
@@ -256,7 +256,7 @@
     <tr>
       <td><code>src/services/ollama_bootstrap.py</code></td>
       <td>Startup provisioning of the host models over Ollama's REST API</td>
-      <td><a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:264</a></td>
+      <td><a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:271</a></td>
     </tr>
     <tr>
       <td><code>src/database/schema.py</code></td>
@@ -276,7 +276,7 @@
     <tr>
       <td><code>pipeline/</code></td>
       <td>The three build-time stages plus the shared LLM extraction library</td>
-      <td><a class="ref" href="../../pipeline/ingest.py">ingest.py:425</a></td>
+      <td><a class="ref" href="../../pipeline/ingest.py">ingest.py:433</a></td>
     </tr>
     <tr>
       <td><code>src/static/</code></td>
@@ -286,7 +286,7 @@
     <tr>
       <td><code>electron/</code></td>
       <td>Desktop wrapper: setup wizard, dependency install, stack supervisor</td>
-      <td><a class="ref" href="../../electron/main.js">main.js:102</a></td>
+      <td><a class="ref" href="../../electron/main.js">main.js:157</a></td>
     </tr>
   </tbody>
 </table>
@@ -316,7 +316,7 @@
     <h4>Graph traversal is additive, never fatal</h4>
     <p>
       The entity-extraction and graph-query block is wrapped in a bare <code>except: pass</code>
-      (<a class="ref" href="../../src/services/rag.py">rag.py:165</a>). If the LLM hiccups mid-query,
+      (<a class="ref" href="../../src/services/rag.py">rag.py:179</a>). If the LLM hiccups mid-query,
       the answer degrades to vector-only results instead of failing.
     </p>
   </div>
@@ -339,7 +339,7 @@
     <h4>Fail fast on a missing Ollama</h4>
     <p>
       The lifespan raises and the API process exits if the host daemon can't be reached
-      (<a class="ref" href="../../src/main.py">main.py:59</a>). A running API with no usable LLM would
+      (<a class="ref" href="../../src/main.py">main.py:70</a>). A running API with no usable LLM would
       only serve broken chat.
     </p>
   </div>

@@ -13,18 +13,18 @@ Built at the University of Arkansas at Little Rock. Not licensed for redistribut
 
 ## Status of this version
 
-**0.4.0 is built but not ready to distribute.** The code is complete and tested. The
-remaining problems are in the release packaging and one bug:
+**0.4.0 is built but not ready to distribute.** Two of its problems are already
+fixed in the code; the packaging problem and signing remain:
 
-| # | Issue | Effect | What it takes |
+| # | Issue | Effect in the 0.4.0 build | Status |
 |---|---|---|---|
-| 1 | **The installer is invalid.** `electron/dist/EM Knowledge Assistant-Setup-0.4.0.exe` is a 0.2 MB stub; its app package was left beside it as `emb-hybrid-desktop-0.4.0-x64.nsis.7z`. | It will not install the app. | Rebuild the installer on a machine where Defender's ASR rule `01443614…` does not block it (see *Code signing*), then check it is ~95 MB. |
-| 2 | **Citation links fail on users' machines.** The shipped graph stores the build machine's absolute file paths. | Answers and citation names are fine; clicking a citation returns an error. | A small code fix, then rebuild. |
-| 3 | **Unsigned.** 31 binaries carry no signature. | Managed Windows machines refuse to run them. | Signing, or an IT exclusion. See *Code signing*. |
-| 4 | **Neo4j usage reporting is on by default.** | The database may periodically send anonymous usage statistics to Neo4j. No questions or documents are included. | One setting, then rebuild the Neo4j package. |
+| 1 | **The installer is invalid.** `electron/dist/EM Knowledge Assistant-Setup-0.4.0.exe` is a 0.2 MB stub; its app package was left beside it as `emb-hybrid-desktop-0.4.0-x64.nsis.7z`. | It will not install the app. | **Open.** Rebuild on a machine where Defender's ASR rule `01443614…` does not block the build (see *Code signing*), then check it is ~95 MB. |
+| 2 | **Citation links failed on users' machines.** The shipped graph stores the build machine's absolute file paths. | Answers and citation names are fine; clicking a citation returns an error. | **Fixed in code** (2026-09-23), with tests. Takes effect in the next build. |
+| 3 | **Unsigned.** 31 binaries carry no signature. | Managed Windows machines refuse to run them. | **Open.** Signing, or an IT exclusion. See *Code signing*. |
+| 4 | **Neo4j usage reporting was on by default.** | The database may periodically send anonymous usage statistics to Neo4j. No questions or documents are included. | **Fixed** (2026-09-23) in the staging script and the staged server. Takes effect in the next build. |
 
-Items 1, 2 and 4 all need a rebuild, so they are best fixed together as 0.4.1,
-before signing. Details and evidence are in
+The next build should be 0.4.1, done before signing, so that the signed files carry
+both fixes. Details and evidence are in
 [`docs/DECONTAINERIZE_PLAN.md`](docs/DECONTAINERIZE_PLAN.md) under *Remaining*.
 
 ---
@@ -73,8 +73,9 @@ level they contain ids, file names, timings and errors, but not question text.
 - **Answering a question needs no internet.** Retrieval, the models and the
   documents are all local.
 - **Internet is used only** to download Ollama and the models on a machine that
-  wasn't prepared in advance, and by Neo4j's usage reporting (issue 4 above).
-  There is no auto-update and no telemetry from the app itself.
+  wasn't prepared in advance. In the 0.4.0 build it is also used by Neo4j's
+  usage reporting (issue 4 above), which is off from the next build. There is no
+  auto-update and no telemetry from the app itself.
 - **Credentials:** each installation generates its own random database password on
   first run and stores it only on that machine. No password or key ships in the
   installer or the assets.
@@ -163,7 +164,7 @@ pwsh -File scripts/stage-usb.ps1 -Destination E:\ -Verify
 Run steps 2–4 once each, in order. Re-running step 2 after step 3 changes the
 checksums, and step 4 will refuse until step 3 is re-run.
 
-**Tests:** `pytest` (143 passing) and `cd electron; npm test` (92 passing).
+**Tests:** `pytest` (156 passing) and `cd electron; npm test` (92 passing).
 
 ---
 

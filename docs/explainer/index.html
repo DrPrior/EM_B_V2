@@ -41,7 +41,7 @@
     Docker was removed (UALR no longer permits it): Neo4j and the API run as <strong>native host
     processes</strong>, and Ollama always did. The code migration is complete, including the Electron
     shell and the build scripts, and release 0.4.0 has been built. What remains is code-signing, a
-    clean-machine test, and one known 0.4.0 bug (citation links fail on end-user machines; see the plan). The canonical plan is
+    clean-machine test, and a rebuild so the next version carries two fixes made after 0.4.0 was built (see the plan). The canonical plan is
     <a class="ref" href="../../docs/DECONTAINERIZE_PLAN.md">docs/DECONTAINERIZE_PLAN.md</a>; the developer
     runbook is <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>.
   </p>
@@ -50,7 +50,7 @@
 <div class="note">
   <strong>How to read this explainer</strong>
   <p>
-    Every <a class="ref" href="../../src/services/rag.py">src/services/rag.py:120</a>-style chip is a
+    Every <a class="ref" href="../../src/services/rag.py">src/services/rag.py:163</a>-style chip is a
     link to the real file in this repository, relative to these pages. The number after the colon is
     the line where the thing being described starts. Open a page from the repo checkout
     (<code>docs/explainer/index.html</code>) so the links resolve.
@@ -241,7 +241,7 @@
     <tr>
       <td><code>src/services/rag.py</code></td>
       <td>The retrieval pipeline and prompt assembly — the heart of the app</td>
-      <td><a class="ref" href="../../src/services/rag.py">rag.py:120</a></td>
+      <td><a class="ref" href="../../src/services/rag.py">rag.py:163</a></td>
     </tr>
     <tr>
       <td><code>src/services/llm.py</code>, <code>embeddings.py</code></td>
@@ -316,7 +316,7 @@
     <h4>Graph traversal is additive, never fatal</h4>
     <p>
       The entity-extraction and graph-query block is wrapped in a bare <code>except: pass</code>
-      (<a class="ref" href="../../src/services/rag.py">rag.py:179</a>). If the LLM hiccups mid-query,
+      (<a class="ref" href="../../src/services/rag.py">rag.py:222</a>). If the LLM hiccups mid-query,
       the answer degrades to vector-only results instead of failing.
     </p>
   </div>

@@ -29,13 +29,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >   `.nsis.7z`). The ASR rule below blocked electron-builder from executing the
 >   freshly built installer mid-build, so **`npm run dist:win` cannot produce a
 >   valid installer on this machine** without an ASR exclusion for the output
->   folder. A valid installer is ~95 MB with a `.blockmap`. **Known 0.4.0 bug:**
->   citation links fail (403) on every end-user machine, because the shipped
->   graph's `File.filepath` values are the maintainer's absolute paths and
->   `_file_url` only strips an exact `DATA_ROOT` prefix. See the plan's
->   Remaining list. **Remaining:** that fix (needs a rebuild), code-signing (with
->   IT: **31 unsigned binaries**, listed in `docs/TARGET_MACHINE_PREP.md`), and a
->   clean-machine first-run test.
+>   folder. A valid installer is ~95 MB with a `.blockmap`. Two 0.4.0 problems
+>   are **fixed in code, pending the next build**: citation links failing (403) on
+>   end-user machines (`_file_url` now maps maintainer paths via
+>   `_relative_to_corpus`), and Neo4j usage reporting being on (`stage-neo4j.ps1`
+>   now turns it off; applied to `C:\stage\neo4j`). **Remaining:** rebuild as
+>   0.4.1 (on a machine where the ASR rule doesn't block the installer build),
+>   code-signing (with IT: **31 unsigned binaries**, listed in
+>   `docs/TARGET_MACHINE_PREP.md`), and a clean-machine first-run test.
 > - **The shipped dump is fine.** `release/neo4j.dump` is verified
 >   `record-aligned-1.1`, so Community can load it, even though dev runs
 >   Enterprise (whose `block` default it cannot). `backup-block/neo4j.dump` is the
@@ -216,9 +217,13 @@ Ingestion supports `.txt`, `.md`, `.pdf`, `.docx`, `.pptx`, and **excludes
 `MANIFEST*.md`** (that's corpus metadata, not content). `File.filepath` is stored
 in forward-slash (POSIX) form via `Path.as_posix()`, so separators agree across
 Windows ingestion, the `/files` URL space and the shipped dump. But it is stored
-**absolute**, as the ingesting machine's path: `_file_url` only produces a
-working link when `DATA_ROOT` equals that path's prefix exactly. That is the
-0.4.0 citation-link bug above.
+**absolute**, as the ingesting machine's path, so the shipped graph carries the
+maintainer's paths. `_file_url` (`src/services/rag.py`) strips `DATA_ROOT` when
+it's a prefix. Otherwise `_relative_to_corpus` keeps whatever follows the
+outermost `project_data` folder, and gives no link at all for a path it can't
+place. Without that fallback every citation link 403'd on end-user machines,
+which was the 0.4.0 bug; `tests/unit/test_file_url.py` pins it. Don't simplify
+it back to a prefix strip.
 
 [pipeline/extract.py](pipeline/extract.py) is **not** a standalone pipeline — it is a shared library
 called by both `enrich.py` (batch) and `rag.py` (per query, for entity extraction

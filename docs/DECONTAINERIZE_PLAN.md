@@ -1,14 +1,17 @@
 # Decontainerization Plan
 
-> **Status: RELEASE 0.4.0 BUILT — sign it, then prove it.** The API, the
-> dev/pipeline flow, the Electron shell and the build scripts all run native.
-> Community 2026.08.1 + Temurin JRE 21 are staged, and the shipped dump is
-> verified to load and serve on that exact server. The 0.4.0 release assets and
-> installer were built on 2026-09-18, and a pre-submission audit passed on
-> 2026-09-23. What's left: **code-sign** (blocked on the UALR cert and the ASR rule
-> below; 31 binaries) and **prove a first run on a clean machine**. This doc is
-> the canonical source of truth; every other doc's "decontainerization" banner
-> points here. Working branch: `Decontainerize`.
+> **Status: 0.4.0 BUILT BUT NOT DISTRIBUTABLE — rebuild as 0.4.1, sign, prove.**
+> The API, the dev/pipeline flow, the Electron shell and the build scripts all run
+> native. Community 2026.08.1 + Temurin JRE 21 are staged, and the shipped dump is
+> verified to load and serve on that exact server. 0.4.0 was built on 2026-09-18,
+> and a docs check on 2026-09-23 found three problems (see Remaining). Its
+> **installer is an invalid stub**, because the ASR rule blocked the build. The
+> **citation-link bug** and **Neo4j usage reporting** are fixed in code but not
+> yet in a build. What's left: **rebuild as 0.4.1** on a machine the ASR rule
+> doesn't block, **code-sign** (UALR cert + ASR rule; 31 binaries), and **prove
+> a first run on a clean machine**. This doc is the canonical source of truth;
+> every other doc's "decontainerization" banner points here. Working branch:
+> `Decontainerize`.
 
 ## Why
 
@@ -81,7 +84,8 @@ Ollama returns to binding loopback only.
   `stage-usb.ps1 -Verify`, **each exactly once and in that order**. Re-running
   build-release after the installer regenerates the checksums (build timestamps
   change them), and stage-usb then refuses; it now names the cause and the fix.
-- **Pre-submission audit, 2026-09-23 — passed.** Python 143 / Electron 92 tests;
+- **Pre-submission audit, 2026-09-23 — passed** (Python 156 after the
+  citation-link fix, 143 at audit time) / Electron 92 tests;
   ruff check clean. The frozen bundle is built from committed code (every freeze
   input predates the build; bundled resources byte-identical to HEAD). The dev
   Neo4j password is found in none of the 989 shipped files; no `.env`, keys or
@@ -186,24 +190,32 @@ Ollama returns to binding loopback only.
   Reproduced with the real `_file_url` and `/files` router against a simulated
   user `DATA_ROOT`. Answers and citation *names* are unaffected; clicking through
   to the source is broken, and each link leaks the maintainer's Windows username.
-  Fix options (each needs a rebuild: new `emb-api.zip` and/or dump → new
-  manifest → new installer):
-  - *Code:* make `_file_url` fall back to the part after the last
-    `/project_data/` segment when the `DATA_ROOT` prefix doesn't match. Small,
-    works for dumps built anywhere, and is unit-testable.
-  - *Data:* store `File.filepath` relative to the corpus root at ingest, and
-    re-key the shipped dump. Cleaner long-term, but touches ingestion, the
-    `/files` router and existing graphs.
-- **Neo4j usage reporting is on in the shipped server.** Neo4j defaults
+  **Fixed in code 2026-09-23; takes effect at the next build** (the 0.4.0
+  `emb-api.zip` in `release/` still has the old code). When the `DATA_ROOT`
+  prefix doesn't match, `_file_url` now falls back to `_relative_to_corpus`:
+  keep whatever follows the outermost corpus folder (`project_data`, or
+  `DATA_ROOT`'s own folder name), matched case-insensitively. It returns *no*
+  link, rather than a broken one, for an absolute path it can't place, and the
+  UI then shows the source name unlinked. `tests/unit/test_file_url.py` (13
+  tests) covers it, including an end-to-end test that opens a maintainer-path
+  citation through the real `/files` router under a user-style `DATA_ROOT`.
+  Nine of those tests fail against the 0.4.0 code. The data-side alternative
+  (store `File.filepath` relative to the corpus root at ingest) is still
+  cleaner long-term, but it would touch ingestion, the router and every
+  existing graph.
+- **Neo4j usage reporting is on in the 0.4.0 server.** Neo4j defaults
   `dbms.usage_report.enabled=true` (and `client.allow_telemetry=true`, for
-  Neo4j Browser). The staged Community `neo4j.conf` only carries the setting
-  commented out, and `stage-neo4j.ps1` doesn't set it, so 0.4.0's Neo4j will
-  periodically try to send anonymous usage statistics to Neo4j over the
-  internet. That's no questions or documents, but it is outbound traffic a
-  reviewer will see. None was observed during a spot check of the dev server on
-  2026-09-23; the reports are periodic. Fix: add
-  `dbms.usage_report.enabled=false` and `client.allow_telemetry=false` to
-  `stage-neo4j.ps1`'s settings, re-stage, and rebuild `neo4j-community.zip`.
+  Neo4j Browser). The 0.4.0 staged Community `neo4j.conf` only carried the
+  setting commented out, so 0.4.0's Neo4j would periodically try to send
+  anonymous usage statistics to Neo4j over the internet. That's no questions or
+  documents, but it is outbound traffic a reviewer will see. None was observed
+  during a spot check of the dev server on 2026-09-23; the reports are periodic.
+  **Fixed 2026-09-23; takes effect at the next build:** `stage-neo4j.ps1` now
+  sets both to `false`. They have been applied to `C:\stage\neo4j`, and
+  `neo4j-admin server validate-config` accepts them. A control with a bogus
+  setting is rejected, so Community 2026.08.1 does recognise both names.
+  `neo4j-community.zip` in `release/` still has the old config until
+  `build-release.ps1` re-zips it.
 - **Follow-ups from the audit (not blockers):**
   - *Index rebuild after `/health`.* Every API start drops and rebuilds
     `chunk_vector_idx`; measured ~5 s where `/health` is green but vector search

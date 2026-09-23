@@ -30,7 +30,7 @@
   One question, traced from the browser's <code>fetch</code> to the last streamed token. Streaming and
   non-streaming chat share the entire retrieval path — they diverge only at the final Ollama call.
   Everything below happens in
-  <a class="ref" href="../../src/services/rag.py">src/services/rag.py:120</a>.
+  <a class="ref" href="../../src/services/rag.py">src/services/rag.py:163</a>.
 </p>
 
 <h2>End to end</h2>
@@ -154,11 +154,11 @@
     <a class="ref" href="../../src/services/embeddings.py">embeddings.py:8</a> POSTs to
     <code>/api/embeddings</code>. This is the one step that is <em>not</em> allowed to fail — an
     exception here becomes an HTTP 500
-    (<a class="ref" href="../../src/services/rag.py">rag.py:142</a>).
+    (<a class="ref" href="../../src/services/rag.py">rag.py:185</a>).
   </li>
   <li>
     <strong>Vector search</strong>
-    <code>_VECTOR_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:78</a>) asks the
+    <code>_VECTOR_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:121</a>) asks the
     index for <code>retrieval_top_k</code> nearest chunks, then <code>OPTIONAL MATCH</code>es back up to
     the owning File and collects any File that <code>SUPERSEDES</code> it.
   </li>
@@ -171,7 +171,7 @@
   </li>
   <li>
     <strong>Graph traversal</strong>
-    <code>_GRAPH_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:89</a>) finds
+    <code>_GRAPH_QUERY</code> (<a class="ref" href="../../src/services/rag.py">rag.py:132</a>) finds
     chunks that <code>MENTIONS</code> a matching Concept/Organization or <code>CITES</code> a matching
     LegalReference — case-insensitively — then rescores each with
     <code>vector.similarity.cosine()</code> against the question vector and keeps the best few above
@@ -235,7 +235,7 @@
   <text x="440" y="375" class="d-m xs d-c">order is preserved into both the prompt context and the sources array returned to the UI</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../src/services/rag.py">rag.py:190</a>. Note the asymmetry: the vector floor
+  <a class="ref" href="../../src/services/rag.py">rag.py:233</a>. Note the asymmetry: the vector floor
   is enforced in Python <em>after</em> the query returns, so <code>top_k</code> results are always
   fetched and some may be discarded; the graph floor is pushed down into Cypher.
 </figcaption>
@@ -284,7 +284,7 @@
   <text x="20" y="410" class="d-m">If nothing survived the score floors, the context block is replaced by an explicit instruction to say so rather than guess.</text>
 </svg>
 <figcaption>
-  Built at <a class="ref" href="../../src/services/rag.py">rag.py:246</a>. The delimiters are constants
+  Built at <a class="ref" href="../../src/services/rag.py">rag.py:289</a>. The delimiters are constants
   at <a class="ref" href="../../src/services/rag.py">rag.py:22</a> and are named in the system prompt
   itself, so the two can never drift apart.
 </figcaption>
@@ -293,7 +293,7 @@
 <h2>Streaming</h2>
 
 <p>
-  <code>stream_answer</code> (<a class="ref" href="../../src/services/rag.py">rag.py:305</a>) runs
+  <code>stream_answer</code> (<a class="ref" href="../../src/services/rag.py">rag.py:348</a>) runs
   retrieval <em>synchronously</em> and returns a generator. That ordering is what lets the router emit a
   <code>metadata</code> event containing the sources before the first token exists — the UI can render
   the citation panel while the model is still thinking.
@@ -345,7 +345,7 @@
 <p>
   <strong>History survives a disconnect.</strong> The token generator accumulates tokens in a list and
   stores the turn inside a <code>finally</code>
-  (<a class="ref" href="../../src/services/rag.py">rag.py:333</a>). Whether the client reads every token
+  (<a class="ref" href="../../src/services/rag.py">rag.py:376</a>). Whether the client reads every token
   or closes the tab halfway, whatever was generated lands in the session history — so a follow-up
   question still has context.
 </p>
@@ -367,10 +367,14 @@
 <ol>
   <li>
     Each source carries a <code>url</code> built by
-    <a class="ref" href="../../src/services/rag.py">rag.py:53</a>, which strips
+    <a class="ref" href="../../src/services/rag.py">rag.py:92</a>, which strips
     <code>settings.data_root</code> off the stored filepath and percent-encodes the remainder into
-    <code>/files/&lt;relative path&gt;</code>. Catalogue-only entries get a URL too — the endpoint just
-    404s.
+    <code>/files/&lt;relative path&gt;</code>. Stored filepaths are the <em>ingesting</em> machine's
+    absolute paths, so for a graph built elsewhere — the shipped one — the root won't match; the
+    function then keeps whatever follows the <code>project_data</code> folder
+    (<a class="ref" href="../../src/services/rag.py">rag.py:58</a>), and gives no link at all for a path
+    it can't place rather than one that leaks another machine's layout. Catalogue-only entries get a
+    URL too — the endpoint just 404s.
   </li>
   <li>
     On the <code>done</code> event, <a class="ref" href="../../src/static/app.js">app.js:100</a> builds a

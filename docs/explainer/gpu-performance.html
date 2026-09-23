@@ -127,7 +127,7 @@
   <div class="card">
     <h4>Every query runs the LLM twice</h4>
     <p>
-      Before the answer, <a class="ref" href="../../pipeline/extract.py">extract.py:75</a> makes a full
+      Before the answer, <a class="ref" href="../../pipeline/extract.py">extract.py:78</a> makes a full
       <code>chat-model</code> call to pull entities for graph search — ~6–22&nbsp;s on its own, sometimes
       dragging in a model-reload spike.
     </p>
@@ -188,7 +188,7 @@
     <h4>iGPU offload enabled</h4>
     <p>
       <code>OLLAMA_IGPU_ENABLE=1</code> + <code>OLLAMA_VULKAN=1</code>, applied only on Intel-only hosts
-      by <a class="ref" href="../../electron/lib/ollamaenv.js">ollamaenv.js:74</a>. CUDA/Metal hosts are
+      by <a class="ref" href="../../electron/lib/ollamaenv.js">ollamaenv.js:81</a>. CUDA/Metal hosts are
       untouched — preserve that guard for every change below.
     </p>
   </div>
@@ -281,8 +281,8 @@
     <tr>
       <td><strong>Cap the answer length</strong> — add <code>num_predict</code> (~700) to the chat
           <code>options</code></td>
-      <td><a class="ref" href="../../src/services/llm.py">llm.py:63</a> and
-          <a class="ref" href="../../src/services/llm.py">llm.py:89</a></td>
+      <td><a class="ref" href="../../src/services/llm.py">llm.py:73</a> and
+          <a class="ref" href="../../src/services/llm.py">llm.py:99</a></td>
       <td>The 1,660-token answers are the 189&nbsp;s. A 700-token bound at ~11&nbsp;tok/s ≈ 65&nbsp;s — the
           single biggest cut. Verbose replies were never asked for; the prompt already says "be concise."</td>
       <td><span class="tag post">SAFE</span> identical effect everywhere</td>
@@ -290,8 +290,8 @@
     <tr>
       <td><strong>Trim retrieval</strong> — <code>retrieval_top_k</code> 5→3,
           <code>graph_retrieval_limit</code> 3→2</td>
-      <td><a class="ref" href="../../src/core/config.py">config.py:85</a>,
-          <a class="ref" href="../../src/core/config.py">config.py:110</a></td>
+      <td><a class="ref" href="../../src/core/config.py">config.py:111</a>,
+          <a class="ref" href="../../src/core/config.py">config.py:146</a></td>
       <td>Up to 8 chunks × 512 tok drives the 2.4–3.4K-token prompt. Fewer chunks cut prompt-eval
           linearly <em>and</em> shrink the KV the generator scans. Re-check answer quality after.</td>
       <td><span class="tag post">SAFE</span> proportional gain</td>
@@ -299,8 +299,8 @@
     <tr>
       <td><strong>Bound injected history</strong> — feed the model fewer than
           <code>max_history_turns</code> (10) turns</td>
-      <td><a class="ref" href="../../src/services/rag.py">rag.py:239</a> /
-          <a class="ref" href="../../src/core/config.py">config.py:81</a></td>
+      <td><a class="ref" href="../../src/services/rag.py">rag.py:311</a> /
+          <a class="ref" href="../../src/core/config.py">config.py:88</a></td>
       <td>History is prepended verbatim, so the prompt (and prompt-eval time) grows every turn. Keeping
           the store at 10 but injecting the last ~4 caps that growth.</td>
       <td><span class="tag post">SAFE</span></td>
@@ -315,7 +315,7 @@
     </tr>
     <tr>
       <td><strong>Shrink the entity-extraction input</strong> — <code>text[:3000]</code> → <code>[:1500]</code></td>
-      <td><a class="ref" href="../../pipeline/extract.py">extract.py:94</a></td>
+      <td><a class="ref" href="../../pipeline/extract.py">extract.py:97</a></td>
       <td>The query is short; 3,000 chars of prompt for it is generous. Halving it trims the 2nd LLM
           call's prompt-eval with no effect on the batch enrichment path's quality.</td>
       <td><span class="tag post">SAFE</span></td>
@@ -380,14 +380,15 @@
 </figcaption>
 </figure>
 
-<div class="note warn">
-  <strong>These app-code wins aren't live on the running app yet</strong>
+<div class="note">
+  <strong>These app-code wins are live</strong>
   <p>
-    The 2.4× above was measured with a native API (<code>uvicorn --reload</code>) run against this
-    branch. The Family&nbsp;B changes go live for everyone only once this branch is <strong>merged to
-    main</strong> — a dev API's <code>--reload</code> picks them up on save, and a shipped build picks
-    them up on its next release. The host env vars, by contrast, are already applied — they live in the
-    Ollama daemon, not the repo.
+    The 2.4× above was measured with a native API (<code>uvicorn --reload</code>). The Family&nbsp;B
+    changes have since merged to both <code>main</code> and <code>Decontainerize</code>. They are the
+    current defaults in <code>config.py</code> (<code>retrieval_top_k=3</code>,
+    <code>graph_retrieval_limit=2</code>, <code>answer_max_tokens=700</code>,
+    <code>history_injection_turns=4</code>) and are in the v0.4.0 desktop build. The host env vars
+    live in the Ollama daemon, not the repo; the desktop wizard sets them.
   </p>
 </div>
 
@@ -397,6 +398,7 @@
   <li>
     <strong>Cap the answer length first</strong> (<code>num_predict≈700</code> in llm.py). Biggest single
     win, one-line change, no daemon restart. Re-run a query and read the <code>eval</code> token count.
+    <em>Done</em> — <code>answer_max_tokens=700</code>.
   </li>
   <li>
     <strong>Set the host env vars</strong> (<code>FLASH_ATTENTION=1</code>, <code>KV_CACHE_TYPE=q8_0</code>,
@@ -406,11 +408,13 @@
   </li>
   <li>
     <strong>Trim retrieval</strong> to <code>top_k=3</code>, <code>graph_limit=2</code>. Watch answer
-    quality on a few real questions; back off if citations thin out.
+    quality on a few real questions; back off if citations thin out. <em>Done</em> — these are the
+    defaults.
   </li>
   <li>
     <strong>Bound injected history</strong> and, only if measured prompts fit, drop <code>num_ctx</code>
-    to 6144. Measure before committing.
+    to 6144. Measure before committing. <em>History bounding done</em>
+    (<code>history_injection_turns=4</code>); <code>num_ctx</code> deliberately left at 8192.
   </li>
   <li>
     <strong>Re-baseline.</strong> Only once these are exhausted does a model swap (a lighter/faster chat

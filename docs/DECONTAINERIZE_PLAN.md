@@ -1,13 +1,17 @@
 # Decontainerization Plan
 
-> **Status: CODE DONE, NEO4J STAGED — build, sign, and prove it.** The API, the
-> dev/pipeline flow, the Electron shell and the build scripts all run native.
-> Workstream C is done: Community 2026.08.1 + Temurin JRE 21 are staged, and the
-> shipped dump is verified to load and serve on that exact server. What's left:
-> **run the release build**, **code-sign** (blocked on the UALR cert + the ASR
-> rule below), and **prove a first run on a clean machine**. This doc is the
-> canonical source of truth; every other doc's "decontainerization" banner points
-> here. Working branch: `Decontainerize`.
+> **Status: 0.4.0 BUILT BUT NOT DISTRIBUTABLE — rebuild as 0.4.1, sign, prove.**
+> The API, the dev/pipeline flow, the Electron shell and the build scripts all run
+> native. Community 2026.08.1 + Temurin JRE 21 are staged, and the shipped dump is
+> verified to load and serve on that exact server. 0.4.0 was built on 2026-09-18,
+> and a docs check on 2026-09-23 found three problems (see Remaining). Its
+> **installer is an invalid stub**, because the ASR rule blocked the build. The
+> **citation-link bug** and **Neo4j usage reporting** are fixed in code but not
+> yet in a build. What's left: **rebuild as 0.4.1** on a machine the ASR rule
+> doesn't block, **code-sign** (UALR cert + ASR rule; 31 binaries), and **prove
+> a first run on a clean machine**. This doc is the canonical source of truth;
+> every other doc's "decontainerization" banner points here. Working branch:
+> `Decontainerize`.
 
 ## Why
 
@@ -74,11 +78,23 @@ Ollama returns to binding loopback only.
 - ~~C inputs are not staged.~~ **Done 2026-09-18** — see *C. as built* below.
   Neo4j Community **2026.08.1** at `C:\stage\neo4j`, Temurin **JRE 21.0.12.1** at
   `C:\stage\jre`, both produced by `scripts/stage-neo4j.ps1`.
-- **Run the release build.** `build-release.ps1 -Neo4jHome C:\stage\neo4j
-  -JreHome C:\stage\jre -Python <pyAI>\python.exe`, then `npm run dist:win`, then
-  `stage-usb.ps1 -Verify`. Pass `-Python` explicitly: the `python` on PATH is a
-  system Python without PyInstaller or the app's deps, and the preflight will
-  refuse it.
+- ~~Run the release build.~~ **Done 2026-09-18** (0.4.0; checksums committed in
+  #36). The order is `build-release.ps1 -Neo4jHome C:\stage\neo4j -JreHome
+  C:\stage\jre -Python <pyAI>\python.exe`, then `npm run dist:win`, then
+  `stage-usb.ps1 -Verify`, **each exactly once and in that order**. Re-running
+  build-release after the installer regenerates the checksums (build timestamps
+  change them), and stage-usb then refuses; it now names the cause and the fix.
+- **Pre-submission audit, 2026-09-23 — passed** (Python 156 after the
+  citation-link fix, 143 at audit time) / Electron 92 tests;
+  ruff check clean. The frozen bundle is built from committed code (every freeze
+  input predates the build; bundled resources byte-identical to HEAD). The dev
+  Neo4j password is found in none of the 989 shipped files; no `.env`, keys or
+  credential files ship, and the dump carries only the `neo4j` database (no users).
+  API and Neo4j bind `127.0.0.1` only; the legacy `api_server.py` (`0.0.0.0`) is
+  not frozen in; the UI loads nothing external. `/files` refused all 7 traversal
+  probes. A live run from source answered a real question with correct citations,
+  and streaming and graph search both work. Two follow-ups surfaced (below, not
+  blockers).
 - ~~The dump's store format is unverified.~~ **Settled 2026-09-17:
   `release/neo4j.dump` is `record-aligned-1.1` — Community-loadable.** The
   2026-09-14 block→record migration did happen and `release/neo4j.dump` is its
@@ -135,11 +151,88 @@ Ollama returns to binding loopback only.
   `build-release.ps1 -CertSubject` has never been used, so the exe and the
   installer both ship unsigned. Gated on the UALR certificate — and see the ASR
   item above, which raises the stakes: unsigned here means "does not run", not
-  just "shows a warning".
+  just "shows a warning". **The 2026-09-23 audit found 31 unsigned binaries**:
+  the installer; the desktop app's exe, `elevate.exe` and 6 DLLs; `emb-api.exe`;
+  and **21 `.dll`/`.pyd` under `_internal\`**. Everything else is vendor-signed
+  (JRE by Eclipse, Neo4j by Apache, most of the Python runtime by
+  Anaconda/Microsoft). The full list is in `TARGET_MACHINE_PREP.md`. Two gaps to
+  close once the cert exists:
+  - `-CertSubject` signs **only `emb-api.exe`**. Microsoft describes the ASR rule
+    as covering `.dll` too, so it must also sign the 21 `_internal` binaries.
+  - electron-builder signs the app exe and installer; confirm it also signs the
+    bundled DLLs, or add it to the signing config.
+- **⚠️ The 0.4.0 installer in `electron/dist/` is invalid — do not distribute it.**
+  Found 2026-09-23. `EM Knowledge Assistant-Setup-0.4.0.exe` is **0.2 MB**
+  (0.3.1 was 95 MB), and the app package it should contain was left beside it as
+  `emb-hybrid-desktop-0.4.0-x64.nsis.7z` (94.3 MB), with no `.blockmap`. Cause,
+  from the Defender Operational log: at **15:43:35 on 2026-09-18**, the second
+  the installer was written, ASR rule `01443614…` (event 1121) blocked `node.exe`
+  (electron-builder) from **executing** that exe. On Windows, electron-builder
+  runs a freshly compiled installer during the NSIS build to produce the
+  uninstaller. On a machine enforcing this rule, that step is blocked and the
+  build stops partway. So **the installer cannot be built correctly on this
+  machine as it is**, even though the unpacked app (`win-unpacked/`, 347 MB) and
+  all five release assets are fine. The fix is an ASR exclusion for the build
+  output folder, or building on an unmanaged machine or VM. Then re-run `npm run
+  dist:win` and check the result is ~95 MB with a `.blockmap` before staging.
+  `stage-usb.ps1` does not currently check installer size.
+- **⚠️ Known bug in 0.4.0: citation links fail on every end-user machine.**
+  Found 2026-09-23 while checking the docs; the audit's live run missed it
+  because it ran with the maintainer's own `DATA_ROOT`. The shipped graph stores
+  every `File.filepath` as an absolute maintainer path
+  (`C:/Users/seprior/EM_B_Hybrid/project_data/...`, 147/147). `_file_url`
+  (`src/services/rag.py`) turns a filepath into a link by stripping `DATA_ROOT`
+  as a prefix. On a user's machine `DATA_ROOT` is
+  `<userData>/project_data` (`electron/lib/envfile.js`), the prefix doesn't
+  match, and the link keeps the full path:
+  `/files/C%3A/Users/seprior/.../x.pdf`, which the traversal guard refuses (403).
+  The file itself is present, and `/files/<relative path>` serves it (200).
+  Reproduced with the real `_file_url` and `/files` router against a simulated
+  user `DATA_ROOT`. Answers and citation *names* are unaffected; clicking through
+  to the source is broken, and each link leaks the maintainer's Windows username.
+  **Fixed in code 2026-09-23; takes effect at the next build** (the 0.4.0
+  `emb-api.zip` in `release/` still has the old code). When the `DATA_ROOT`
+  prefix doesn't match, `_file_url` now falls back to `_relative_to_corpus`:
+  keep whatever follows the outermost corpus folder (`project_data`, or
+  `DATA_ROOT`'s own folder name), matched case-insensitively. It returns *no*
+  link, rather than a broken one, for an absolute path it can't place, and the
+  UI then shows the source name unlinked. `tests/unit/test_file_url.py` (13
+  tests) covers it, including an end-to-end test that opens a maintainer-path
+  citation through the real `/files` router under a user-style `DATA_ROOT`.
+  Nine of those tests fail against the 0.4.0 code. The data-side alternative
+  (store `File.filepath` relative to the corpus root at ingest) is still
+  cleaner long-term, but it would touch ingestion, the router and every
+  existing graph.
+- **Neo4j usage reporting is on in the 0.4.0 server.** Neo4j defaults
+  `dbms.usage_report.enabled=true` (and `client.allow_telemetry=true`, for
+  Neo4j Browser). The 0.4.0 staged Community `neo4j.conf` only carried the
+  setting commented out, so 0.4.0's Neo4j would periodically try to send
+  anonymous usage statistics to Neo4j over the internet. That's no questions or
+  documents, but it is outbound traffic a reviewer will see. None was observed
+  during a spot check of the dev server on 2026-09-23; the reports are periodic.
+  **Fixed 2026-09-23; takes effect at the next build:** `stage-neo4j.ps1` now
+  sets both to `false`. They have been applied to `C:\stage\neo4j`, and
+  `neo4j-admin server validate-config` accepts them. A control with a bogus
+  setting is rejected, so Community 2026.08.1 does recognise both names.
+  `neo4j-community.zip` in `release/` still has the old config until
+  `build-release.ps1` re-zips it.
+- **Follow-ups from the audit (not blockers):**
+  - *Index rebuild after `/health`.* Every API start drops and rebuilds
+    `chunk_vector_idx`; measured ~5 s where `/health` is green but vector search
+    returns nothing, longer on slow laptops. Either keep the index when its
+    dimensions match, or make `/health` (or the supervisor) wait for `ONLINE`.
+  - *Deprecated vector procedure.* Neo4j 2026.08.1 flags
+    `db.index.vector.queryNodes` as deprecated in favour of the Cypher `SEARCH`
+    clause. It works, but logs a long warning per chat into `api.log`, and a
+    future Neo4j may remove it.
+  - *Formatting.* `ruff format` would restyle `pipeline/load_manifest.py` and six
+    test files. Style only; do it after signing, because any change to shipped
+    Python means a rebuild.
 - **No end-to-end run.** Unit coverage now reaches the decidable parts —
   `procs` (readiness probes), `archive` (the contents-at-root contract, against
   the real OS `tar`), `envfile` (password stability) and `snapshot` (the
-  import-once marker), alongside `apibundle`, `logger` and `ollamaenv`: 86 tests.
+  import-once marker and load→migrate), alongside `apibundle`, `logger` and
+  `ollamaenv`: 92 tests.
   What unit tests cannot reach is still the risky part: **`supervisor.js` and
   `firstrun.js` are only exercised by a real first run** — startup ordering,
   crash detection, orphan cleanup, port collisions, and the multi-GB unpack.
@@ -310,8 +403,7 @@ remembering when touching them:
    staged, dump re-exported, and the full first-run Neo4j sequence proven by
    hand against it. Dev upgraded to 2026.08.1 to match.
 3. ~~**Electron rewrite**~~ and ~~**build pipeline**~~ — done; see **Progress**.
-4. **Run the release build** (`build-release.ps1` with `-Python`) → installer →
-   USB. Nothing blocks this now.
+4. ~~**Run the release build**~~ — done 2026-09-18 (0.4.0), audited 2026-09-23.
 5. **Sign** the API exe and the installer once the UALR cert exists; re-check
    against the ASR rule.
 6. **Clean-machine first-run test** — the only coverage `supervisor.js` and

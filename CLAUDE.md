@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> ## ⚠️ Decontainerization: code done, release artifacts remain
+> ## ⚠️ Decontainerized — release 0.4.0 built, code-signing remains
 >
 > The organization (UALR) no longer permits Docker, so the app runs as **native
 > host processes** — no container runtime at all, every service on `127.0.0.1`.
@@ -19,11 +19,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >   supervisor + first-run), E (freeze spec + build/release scripts). `lib/docker.js`
 >   and `lib/compose.js` are deleted; [electron/lib/procs.js](electron/lib/procs.js) spawns Neo4j and the
 >   frozen API directly.
-> - **Workstream C is staged:** Neo4j Community **2026.08.1** at `C:\stage\neo4j`
->   and Temurin **JRE 21** at `C:\stage\jre` (via `scripts/stage-neo4j.ps1`), and
->   `release/neo4j.dump` re-exported and verified loadable by that Community
->   server. **Remaining:** run `build-release.ps1` → installer → USB, then
->   code-signing (no UALR cert yet) and a clean-machine first-run test.
+> - **Release 0.4.0 is built** (2026-09-18): Neo4j Community **2026.08.1** +
+>   Temurin **JRE 21** staged at `C:\stage\{neo4j,jre}` by `scripts/stage-neo4j.ps1`,
+>   release assets in `release/`, their checksums committed in
+>   `electron/resources/assets.manifest.json` (#36), installer in `electron/dist/`.
+>   An audit on 2026-09-23 passed: tests, secrets sweep, loopback-only binds,
+>   `/files` traversal guard, and a live run from source. **But the 0.4.0
+>   installer is invalid** (0.2 MB stub; its app package was left as a separate
+>   `.nsis.7z`). The ASR rule below blocked electron-builder from executing the
+>   freshly built installer mid-build, so **`npm run dist:win` cannot produce a
+>   valid installer on this machine** without an ASR exclusion for the output
+>   folder. A valid installer is ~95 MB with a `.blockmap`. Two 0.4.0 problems
+>   are **fixed in code, pending the next build**: citation links failing (403) on
+>   end-user machines (`_file_url` now maps maintainer paths via
+>   `_relative_to_corpus`), and Neo4j usage reporting being on (`stage-neo4j.ps1`
+>   now turns it off; applied to `C:\stage\neo4j`). **Remaining:** rebuild as
+>   0.4.1 (on a machine where the ASR rule doesn't block the installer build),
+>   code-signing (with IT: **31 unsigned binaries**, listed in
+>   `docs/TARGET_MACHINE_PREP.md`), and a clean-machine first-run test.
 > - **The shipped dump is fine.** `release/neo4j.dump` is verified
 >   `record-aligned-1.1`, so Community can load it, even though dev runs
 >   Enterprise (whose `block` default it cannot). `backup-block/neo4j.dump` is the
@@ -46,8 +59,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 
-- **FastAPI** served by uvicorn as a native process on `127.0.0.1:8000` (a venv/conda env today; a frozen exe once Workstream E lands)
-- **Neo4j** — native server (needs a JRE 17/21), bolt on `127.0.0.1:7687`, browser on `127.0.0.1:7474`. Neo4j Desktop is the dev path; a bundled tarball is the ship path.
+- **FastAPI** served by uvicorn as a native process on `127.0.0.1:8000`: from a conda env in dev, and as the PyInstaller-frozen `emb-api.exe` in the shipped app
+- **Neo4j** — native server (needs a JRE 17/21), bolt on `127.0.0.1:7687`, browser on `127.0.0.1:7474`. Neo4j Desktop (Enterprise) is the dev path; a bundled Community zip plus a JRE is the ship path.
 - **Ollama** — native on the host, using the host GPU (Metal/CUDA/Vulkan) directly, on `127.0.0.1:11434`. Because the API is also native it reaches Ollama over plain `localhost`; Ollama does **not** need `OLLAMA_HOST=0.0.0.0` (that requirement existed only because the API was containerized).
 - **Static web UI** — chat interface served at `/` from [src/static/](src/static/) (index.html, app.js, style.css, vendored marked + tailwind — no CDN).
 
@@ -129,7 +142,8 @@ optionally references IPython and Tk; without it a dev env leaks ~25 MB of
 notebook stack into the bundle.
 
 **Stage the Neo4j + JRE homes** that `build-release.ps1` consumes (unpack,
-configure for loopback, optionally set the password and load the graph dump):
+configure for loopback, and optionally migrate + re-export the graph dump in a
+scratch data dir; the staged home itself is left with an empty `data\`):
 ```powershell
 pwsh -File scripts/stage-neo4j.ps1 -Zip <neo4j-community-*.zip> -JreZip <jre.zip> `
      -Dump .\release\neo4j.dump -ReExport
@@ -201,8 +215,15 @@ the manifest load makes no LLM calls.
 
 Ingestion supports `.txt`, `.md`, `.pdf`, `.docx`, `.pptx`, and **excludes
 `MANIFEST*.md`** (that's corpus metadata, not content). `File.filepath` is stored
-in forward-slash (POSIX) form via `Path.as_posix()` so Windows ingestion, the
-`/files` URL space, and the shipped graph dump all agree.
+in forward-slash (POSIX) form via `Path.as_posix()`, so separators agree across
+Windows ingestion, the `/files` URL space and the shipped dump. But it is stored
+**absolute**, as the ingesting machine's path, so the shipped graph carries the
+maintainer's paths. `_file_url` (`src/services/rag.py`) strips `DATA_ROOT` when
+it's a prefix. Otherwise `_relative_to_corpus` keeps whatever follows the
+outermost `project_data` folder, and gives no link at all for a path it can't
+place. Without that fallback every citation link 403'd on end-user machines,
+which was the 0.4.0 bug; `tests/unit/test_file_url.py` pins it. Don't simplify
+it back to a prefix strip.
 
 [pipeline/extract.py](pipeline/extract.py) is **not** a standalone pipeline — it is a shared library
 called by both `enrich.py` (batch) and `rag.py` (per query, for entity extraction
@@ -487,9 +508,9 @@ These conventions are enforced across the codebase. Follow them in all new code.
 
 ### Deployment / process model
 
-- Startup order the shell must enforce: Neo4j (native server + bundled JRE) → wait for bolt → API (uvicorn now, frozen exe later) → poll `/health`. Ollama is host-native and only needs to be ensured running.
+- Startup order the shell must enforce: Neo4j (native server + bundled JRE) → wait for bolt → API (uvicorn in dev, the frozen exe when shipped) → poll `/health`. Ollama is host-native and only needs to be ensured running. Note `/health` goes green ~5 s **before** the vector index is usable: every API start drops and rebuilds `chunk_vector_idx` (`setup_constraints`), so a question asked in that window gets no retrieved context.
 - All endpoints bind `127.0.0.1` only. (`api_server.py` is a legacy alternate entry point that still binds `0.0.0.0` — don't use it; prefer `scripts/dev-up.ps1`.)
 - GPU acceleration comes entirely from the host's native Ollama install. The app has no GPU code of its own.
 - **The shipped Neo4j is Community `2026.08.1`**, and the shipped dump must be at its store format (currently `record-aligned-1.1`). Dev runs Enterprise `2026.08.1` (Neo4j Desktop, upgraded in place from 2026.07.1; pre-upgrade backup in `backup-dev-2026.07.1/`). Moving the shipped server between lines means `stage-neo4j.ps1 -Dump … -ReExport` (load → `migrate` → re-dump → verify). **After any Neo4j upgrade, a user database stays on the old kernel version until its first write transaction** — read-only checks will look done when it isn't; see *C. as built* in the plan. See the pitfall list in [docs/DECONTAINERIZE_PLAN.md](docs/DECONTAINERIZE_PLAN.md). Set the Neo4j password **before first init** (`neo4j-admin dbms set-initial-password`); it is baked into the data dir.
-- **Shipping the runtimes (open decision):** recommended — freeze the API with PyInstaller (one-dir) and code-sign it; ship native Neo4j + a bundled JRE unpacked. Installer signing is staged but blocked on a UALR certificate.
+- **Shipping the runtimes:** the API is frozen with PyInstaller (one-dir) and Neo4j + a JRE ship unpacked, all as USB assets. Signing is configured but blocked on a UALR certificate, and `build-release.ps1 -CertSubject` signs only `emb-api.exe`. The Defender ASR rule covers DLLs too, so it needs extending to the 21 unsigned `_internal` binaries before the cert is used.
 - All credentials via `.env` / environment — never hardcoded secrets.

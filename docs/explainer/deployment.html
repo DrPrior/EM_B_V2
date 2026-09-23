@@ -38,8 +38,8 @@
     Docker is gone. Neo4j and the API run as <strong>native host processes</strong> supervised by the
     Electron shell; Ollama always was native. The shell's native process manager
     (<code>electron/lib/procs.js</code>) and the native build pipeline have landed, so the descriptions
-    below match merged code. The canonical plan, including what is still open (release artifacts,
-    code-signing), is
+    below match merged code. The canonical plan, including what is still open (code-signing, a clean-machine
+    test, and rebuilding to pick up the post-0.4.0 fixes), is
     <a class="ref" href="../../docs/DECONTAINERIZE_PLAN.md">docs/DECONTAINERIZE_PLAN.md</a>; the developer
     runbook is <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>.
   </p>
@@ -80,7 +80,7 @@
   <p>
     A native API reaches Ollama over <code>http://localhost:11434</code>, so Ollama stays on its default
     loopback bind — <code>OLLAMA_HOST=0.0.0.0</code> is <strong>no longer needed</strong>, and with it the
-    whole LAN-exposure problem and firewall-hardening step disappear (that script is being retired). What
+    whole LAN-exposure problem and firewall-hardening step disappear (that script is retired, kept only for its <code>-Revert</code> path). What
     remains is installing Ollama and keeping the warmth/perf env vars
     (<code>OLLAMA_KEEP_ALIVE=-1</code>, <code>OLLAMA_MAX_LOADED_MODELS=2</code>, …). Full instructions are
     in <a class="ref" href="../../docs/NATIVE_DEV.md">docs/NATIVE_DEV.md</a>.
@@ -146,7 +146,7 @@
   <text x="32" y="301" class="d-m xs">static mount so "/" cannot shadow them.</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../src/main.py">main.py:21</a>. Startup and teardown are a single
+  <a class="ref" href="../../src/main.py">main.py:26</a>. Startup and teardown are a single
   <code>@asynccontextmanager</code> — no <code>@app.on_event</code> anywhere in the codebase.
 </figcaption>
 </figure>
@@ -203,7 +203,7 @@
   <text x="34" y="409" class="d-t sm">The base model is passed explicitly as <tspan class="d-t sm mono">from</tspan>, never read from the Modelfile's FROM line — so what gets pulled and what the variant is built on can never drift apart.</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:248</a>. Idempotent by
+  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:255</a>. Idempotent by
   construction: on a warm host it is one HTTP GET and two set lookups.
 </figcaption>
 </figure>
@@ -215,16 +215,16 @@
   purely over Ollama's HTTP API — it never shells out to an <code>ollama</code> CLI, which a frozen,
   CLI-free deployment can't assume is on <code>PATH</code> — and modern <code>/api/create</code> no
   longer accepts a raw Modelfile string. So
-  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:159</a> parses the
+  <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:165</a> parses the
   file itself, extracting the <code>SYSTEM</code> block — including the triple-quoted multi-line form,
-  handled by <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:201</a> —
+  handled by <a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:207</a> —
   and every <code>PARAMETER</code> line into a typed dict, then posts them as structured JSON.
   <code>FROM</code>, <code>TEMPLATE</code> and everything else are ignored.
 </p>
 
 <p>
   Parameter values are coerced to <code>int</code>, then <code>float</code>, then left as a string
-  (<a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:146</a>), and a
+  (<a class="ref" href="../../src/services/ollama_bootstrap.py">ollama_bootstrap.py:152</a>), and a
   repeated key accumulates into a list — matching how Ollama itself treats repeated directives such as
   <code>stop</code>.
 </p>
@@ -233,7 +233,7 @@
   <strong>Re-provisioning without a restart</strong>
   <p>
     <code>POST /admin/bootstrap-models</code>
-    (<a class="ref" href="../../src/routers/admin.py">admin.py:112</a>) calls the same two functions the
+    (<a class="ref" href="../../src/routers/admin.py">admin.py:121</a>) calls the same two functions the
     lifespan does, returning 503 rather than killing the process if the daemon is down. Use it after
     editing a Modelfile — though note the variant must be deleted on the host first, since an existing
     variant is skipped.
@@ -245,7 +245,7 @@
 <p>
   <code>electron/</code> wraps everything above for non-technical users. A single window opens as a
   setup wizard and navigates to <code>http://127.0.0.1:8000</code> once the backend reports healthy
-  (<a class="ref" href="../../electron/main.js">main.js:63</a>). Heavy assets — the signed API bundle,
+  (<a class="ref" href="../../electron/main.js">main.js:96</a>). Heavy assets — the signed API bundle,
   native Neo4j plus its bundled JRE, a pre-built graph snapshot, and the document corpus — are delivered
   on a USB drive rather than downloaded.
 </p>
@@ -343,9 +343,9 @@
   <text x="34" y="490" class="d-t sm">re-checks its own precondition — Ollama up? models pulled? Neo4j unpacked? snapshot loaded? marker written? — so provisioning picks up exactly where it stopped.</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../electron/lib/firstrun.js">firstrun.js:54</a> is the first-run orchestrator ·
-  <a class="ref" href="../../electron/supervisor.js">supervisor.js:67</a> is the fast path ·
-  <a class="ref" href="../../electron/main.js">main.js:102</a> is the IPC handler that picks between
+  <a class="ref" href="../../electron/lib/firstrun.js">firstrun.js:57</a> is the first-run orchestrator ·
+  <a class="ref" href="../../electron/supervisor.js">supervisor.js:168</a> is the fast path ·
+  <a class="ref" href="../../electron/main.js">main.js:157</a> is the IPC handler that picks between
   them based on the marker file.
 </figcaption>
 </figure>
@@ -357,7 +357,7 @@
     <strong>The window is the app.</strong> One <code>BrowserWindow</code> loads
     <code>wizard.html</code> from disk, then <code>loadURL</code>s the local API once healthy. Progress
     events stream from main to renderer over an IPC channel
-    (<a class="ref" href="../../electron/main.js">main.js:35</a>).
+    (<a class="ref" href="../../electron/main.js">main.js:63</a>).
   </li>
   <li>
     <strong>Context isolation is on, node integration off.</strong> The renderer touches nothing but the
@@ -365,13 +365,13 @@
   </li>
   <li>
     <strong>External links leave the app.</strong> Any URL that isn't the local API opens in the system
-    browser (<a class="ref" href="../../electron/main.js">main.js:55</a>).
+    browser (<a class="ref" href="../../electron/main.js">main.js:83</a>).
   </li>
   <li>
     <strong>Quit tears the processes down.</strong> <code>before-quit</code> is intercepted, kills the
     whole child process tree (Neo4j + API — Windows <code>taskkill /T</code> or <code>tree-kill</code>),
     then quits for real — the graph persists in Neo4j's data directory
-    (<a class="ref" href="../../electron/main.js">main.js:145</a>). Startup ordering, crash detection,
+    (<a class="ref" href="../../electron/main.js">main.js:215</a>). Startup ordering, crash detection,
     orphan cleanup, and port-in-use collisions (7687 / 8000 / 7474) are all things the shell now owns
     directly — Docker used to hand them over for free.
   </li>

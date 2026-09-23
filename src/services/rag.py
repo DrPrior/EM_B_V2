@@ -50,13 +50,56 @@ def _superseded_by(record: dict) -> str | None:
     return " / ".join(dict.fromkeys(names)) if names else None
 
 
+# The corpus folder's conventional name. build-release.ps1 archives it under this
+# name and the desktop app extracts it to <userData>/project_data.
+_CORPUS_DIR = "project_data"
+
+
+def _relative_to_corpus(fp: str, root: str) -> str | None:
+    """Map a filepath recorded on another machine onto this machine's corpus.
+
+    ``File.filepath`` is stored absolute, as the *ingesting* machine's path. The
+    shipped graph is built on the maintainer's machine, so on a user's machine
+    its paths (``C:/Users/<maintainer>/.../project_data/...``) never start with
+    the local ``DATA_ROOT`` (``<userData>/project_data``). What does survive the
+    move is everything after the corpus folder, so find that folder in the path
+    and keep the rest.
+
+    Args:
+        fp: The stored filepath, already in forward-slash form.
+        root: The local data root, forward-slash form, no trailing slash.
+
+    Returns:
+        The path relative to the corpus root, or None if it can't be placed.
+        None is deliberate for an absolute path with no corpus folder in it: a
+        link built from it would be refused by ``/files`` and would expose the
+        other machine's directory layout (including a username).
+    """
+    lowered = fp.lower()
+    # The outermost occurrence is the corpus root; an inner folder of the same
+    # name is ordinary content.
+    for name in dict.fromkeys((Path(root).name, _CORPUS_DIR)):
+        if not name:
+            continue
+        marker = f"/{name.lower()}/"
+        idx = lowered.find(marker)
+        if idx != -1:
+            return fp[idx + len(marker) :]
+    is_absolute = fp.startswith("/") or (len(fp) > 1 and fp[1] == ":")
+    return None if is_absolute else fp
+
+
 def _file_url(filepath: str | None) -> str | None:
     """Build a `/files/...` URL the UI can link to, from a File's filepath.
 
-    The stored filepath is the absolute path used at ingest time (under
-    ``settings.data_root``). We strip that root and return a URL-encoded path
-    served by the files router. Catalog-only nodes (no on-disk file) still get a
-    URL; the endpoint simply 404s if the file is absent.
+    The stored filepath is the absolute path used at ingest time. When it lies
+    under ``settings.data_root``, we strip that root; when it was recorded on a
+    different machine (the shipped graph), we fall back to the part after the
+    corpus folder — see ``_relative_to_corpus``. The result is URL-encoded and
+    served by the files router, whose traversal guard still applies.
+    Catalog-only nodes (no on-disk file) still get a URL; the endpoint simply
+    404s if the file is absent. Returns None when no link can be built; the UI
+    then shows the source name without a link.
 
     Both sides are normalized to forward-slash (POSIX) form so this works
     regardless of the host OS: native Windows ingestion stores Windows paths, but
@@ -67,9 +110,9 @@ def _file_url(filepath: str | None) -> str | None:
     root = Path(settings.data_root).as_posix().rstrip("/")
     fp = Path(filepath).as_posix()
     if fp.startswith(root + "/"):
-        rel = fp[len(root) + 1 :]
+        rel: str | None = fp[len(root) + 1 :]
     else:
-        rel = fp.lstrip("/")
+        rel = _relative_to_corpus(fp, root)
     if not rel:
         return None
     return f"/files/{quote(rel)}"

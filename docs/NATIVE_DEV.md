@@ -94,10 +94,15 @@ python -m pipeline.enrich
 `File.filepath` is stored forward-slashed and keyed to your `DATA_ROOT`, so
 citation `/files/...` links resolve to your local corpus.
 
-> **Why not just load the shipped `neo4j.dump`?** Its `File.filepath` values are
-> keyed to the container path `/app/project_data`, which doesn't exist on a
-> Windows host — citation links wouldn't resolve. Re-keying/serving the shipped
-> dump natively is a Workstream C task. For dev, a fresh ingest is self-consistent.
+> **Loading the shipped `neo4j.dump` instead?** Its `File.filepath` values are
+> absolute paths from the maintainer's machine
+> (`C:/Users/seprior/EM_B_Hybrid/project_data/...`, all 147 files). Citation
+> links only resolve when `DATA_ROOT` is exactly that path, because `_file_url`
+> in `src/services/rag.py` strips `DATA_ROOT` as a prefix. Anywhere else the link
+> keeps the full path and `/files` refuses it (HTTP 403). This is a **known bug
+> in release 0.4.0**: on end-user machines `DATA_ROOT` is under `%APPDATA%`, so
+> every citation link fails. See `DECONTAINERIZE_PLAN.md`. For dev, a fresh
+> ingest with your own `DATA_ROOT` is self-consistent.
 
 ## 6. Run the API
 

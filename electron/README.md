@@ -169,9 +169,26 @@ npm run dist:win     # NSIS .exe   (run on Windows)
 npm run dist:mac     # .dmg        (run on macOS)
 ```
 
-Output lands in `electron/dist/`. Builds are **unsigned** for now — users get an
-"unidentified developer" warning (Windows SmartScreen → *More info → Run anyway*;
-macOS → right-click *Open*). See *Deferred* below.
+Output lands in `electron/dist/`. Builds are **unsigned** for now. On an
+unmanaged PC that means an "unidentified developer" warning (Windows SmartScreen
+→ *More info → Run anyway*; macOS → right-click *Open*). On **UALR-managed**
+machines it means a hard block that Administrator rights don't bypass: policy
+refuses unsigned binaries, and the Defender ASR rule stops the bundled
+`emb-api.exe` outright. The 31 files that need signing are listed in
+`docs/TARGET_MACHINE_PREP.md`. See *Deferred* below.
+
+**Check the installer's size before staging.** A valid Windows installer is
+~95 MB with a matching `.blockmap`. On a machine enforcing Defender ASR rule
+`01443614…` (UALR-managed Windows), electron-builder is blocked from running the
+freshly compiled installer mid-build (it does this to produce the uninstaller).
+The build then leaves a **~0.2 MB stub** plus a separate `*-x64.nsis.7z`, which
+is what happened to 0.4.0 on 2026-09-18. Build on an unmanaged machine, or with
+the output folder excluded from that rule.
+
+Run **`build-release.ps1` → `npm run dist:win` → `stage-usb.ps1`, once each, in
+that order.** Re-running `build-release.ps1` after building the installer changes
+the asset checksums (build timestamps), so the installer's baked-in manifest goes
+stale; `stage-usb.ps1` detects that and tells you to re-run only `dist:win`.
 
 ### 3. Lay out the USB drive
 

@@ -1,10 +1,29 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Restrict host Ollama's port (11434) to the Docker subnet only, so it is NOT
-    reachable from the LAN when the laptop roams onto untrusted networks.
+    RETIRED - kept only for -Revert. Restricted host Ollama's port (11434) to the
+    Docker subnet so it was not reachable from the LAN on untrusted networks.
 
 .DESCRIPTION
+    *** DO NOT USE THIS TO APPLY NEW RULES. ***
+
+    This script exists for one reason: to UNDO itself on a machine where it was
+    run under the old containerized architecture. The rules it writes are scoped
+    to a Docker subnet that no longer exists on these machines.
+
+    Why it is retired: the API is now a native process and reaches Ollama over
+    127.0.0.1, so OLLAMA_HOST=0.0.0.0 is gone, Ollama binds loopback only, and
+    there is no LAN exposure left to contain. See docs/DECONTAINERIZE_PLAN.md and
+    the "Reverting the Docker-era network exposure" section of docs/HYBRID_SETUP.md.
+
+    To clean up a previously hardened machine, run it ELEVATED:
+
+        pwsh -File scripts/harden-ollama-firewall.ps1 -Revert
+
+    The original description follows, for understanding what -Revert undoes.
+
+    ---
+
     The hybrid architecture sets OLLAMA_HOST=0.0.0.0 so the API *container* can
     reach the host's Ollama via host.docker.internal. But 0.0.0.0 also exposes
     Ollama's UNAUTHENTICATED API on every interface (Wi-Fi included). Ollama has

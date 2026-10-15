@@ -4,6 +4,7 @@ This module initializes the FastAPI application with Neo4j database integration
 using the lifespan context manager for proper startup and shutdown handling.
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI  # type: ignore[import-untyped]
@@ -11,12 +12,15 @@ from fastapi.staticfiles import StaticFiles  # type: ignore[import-untyped]
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from src.core.logging_config import configure_logging
 from src.core.paths import static_dir
 from src.core.rate_limit import limiter
 from src.database.connection import Neo4jConnection
 from src.database.schema import setup_constraints
 from src.routers import admin, chat, files, graph
 from src.services.ollama_bootstrap import OllamaUnavailableError, bootstrap
+
+logger = logging.getLogger("em_b.main")
 
 
 @asynccontextmanager
@@ -39,19 +43,25 @@ async def lifespan(app: FastAPI):
             the required models cannot be provisioned (fail-fast).
         Exception: If Neo4j connection or data ingestion fails during startup.
     """
-    # Startup
+    # Startup — logging first, so every later startup failure is recorded.
+    log_dir = configure_logging()
+    logger.info(
+        "API starting; logging to %s",
+        log_dir / "api.log" if log_dir else "console",
+    )
+
     try:
         connection = Neo4jConnection.get_instance()
         connection.verify_connectivity()
-        print("✓ Neo4j connection initialized successfully")
+        logger.info("Neo4j connection initialized")
 
         setup_constraints(connection.get_driver())
-        print("✓ Database schema constraints and indexes initialized")
-    except ValueError as e:
-        print(f"✗ Failed to initialize Neo4j connection: {e}")
+        logger.info("Database schema constraints and indexes initialized")
+    except ValueError:
+        logger.exception("Failed to initialize Neo4j connection")
         raise
-    except Exception as e:
-        print(f"✗ Unexpected error during Neo4j connection: {e}")
+    except Exception:
+        logger.exception("Unexpected error during Neo4j connection")
         raise
 
     # Provision the host-native (hybrid) Ollama daemon: wait for it to be
@@ -59,9 +69,9 @@ async def lifespan(app: FastAPI):
     # Fail fast — a running API with no usable Ollama only yields broken chat.
     try:
         bootstrap()
-        print("✓ Host Ollama reachable and required models provisioned")
-    except OllamaUnavailableError as e:
-        print(f"✗ {e}")
+        logger.info("Host Ollama reachable and required models provisioned")
+    except OllamaUnavailableError:
+        logger.exception("Host Ollama unavailable; API cannot start")
         raise
 
     yield
@@ -69,11 +79,11 @@ async def lifespan(app: FastAPI):
     # Shutdown
     try:
         connection.close()
-        print("✓ Neo4j connection closed successfully")
+        logger.info("Neo4j connection closed")
     except RuntimeError as e:
-        print(f"⚠ Warning during Neo4j shutdown: {e}")
-    except Exception as e:
-        print(f"✗ Unexpected error during Neo4j shutdown: {e}")
+        logger.warning("Warning during Neo4j shutdown: %s", e)
+    except Exception:
+        logger.exception("Unexpected error during Neo4j shutdown")
 
 
 app = FastAPI(

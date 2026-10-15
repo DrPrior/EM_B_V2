@@ -4,11 +4,11 @@
  * Persist and apply the host-side Ollama environment variables the desktop
  * stack depends on.
  *
- * The Dockerized API reaches host-native Ollama at host.docker.internal:11434,
- * which only works if the daemon binds every interface (OLLAMA_HOST=0.0.0.0) —
- * by default Ollama listens on 127.0.0.1 and refuses the Docker bridge.
- * OLLAMA_KEEP_ALIVE / OLLAMA_MAX_LOADED_MODELS keep the chat and embedding
- * models warm and co-resident so queries don't pay reload lag.
+ * The native API reaches Ollama over loopback, so Ollama's default 127.0.0.1
+ * bind is what we want and OLLAMA_HOST is not set. OLLAMA_KEEP_ALIVE /
+ * OLLAMA_MAX_LOADED_MODELS keep the chat and embedding models warm and
+ * co-resident so queries don't pay reload lag. Docker-era builds persisted
+ * OLLAMA_HOST=0.0.0.0; `ensure` removes that value (see RETIRED).
  *
  * Ollama re-reads these every time the daemon starts, so they have to be set
  * *persistently* in the OS — a per-shell `$env:`/`export` is lost on the next
@@ -42,8 +42,7 @@ const loadOllama = () => require('./ollama');
 // in sync with the "required host environment variables" table in
 // docs/HYBRID_SETUP.md.
 //
-// Three categories, all backend-agnostic (safe on CUDA/Metal/Vulkan alike):
-//   - connectivity: OLLAMA_HOST lets the Docker bridge reach the daemon.
+// Two categories, both backend-agnostic (safe on CUDA/Metal/Vulkan alike):
 //   - warmth:       KEEP_ALIVE + MAX_LOADED_MODELS keep both models co-resident.
 //   - throughput:   FLASH_ATTENTION fuses attention over the KV cache (cutting
 //                   prompt-eval and the long-context generation sag);
@@ -55,12 +54,20 @@ const loadOllama = () => require('./ollama');
 //                   needed >1 parallel slot. Flash attention on Vulkan is a
 //                   no-op on builds that lack it, so it is safe to set blindly.
 const REQUIRED = Object.freeze({
-  OLLAMA_HOST: '0.0.0.0',
   OLLAMA_KEEP_ALIVE: '-1',
   OLLAMA_MAX_LOADED_MODELS: '2',
   OLLAMA_FLASH_ATTENTION: '1',
   OLLAMA_KV_CACHE_TYPE: 'q8_0',
   OLLAMA_NUM_PARALLEL: '1',
+});
+
+// Host vars an earlier (Docker-era) build persisted that must now be removed,
+// keyed to the exact value that build wrote so a value the user set themselves
+// is left alone. OLLAMA_HOST=0.0.0.0 let the API container reach Ollama over
+// the Docker bridge; with a native API it only exposes the unauthenticated
+// Ollama API to the network.
+const RETIRED = Object.freeze({
+  OLLAMA_HOST: '0.0.0.0',
 });
 
 // Extra host vars that unlock an *integrated* Intel GPU (Arc iGPU / Iris Xe) via
@@ -79,7 +86,7 @@ const INTEL_ACCEL = Object.freeze({
 
 /**
  * Resolve the full env-var set to persist for THIS machine: always the base
- * REQUIRED three, plus INTEL_ACCEL when the detected GPU is Intel and there is
+ * REQUIRED set, plus INTEL_ACCEL when the detected GPU is Intel and there is
  * no NVIDIA (CUDA) or Apple (Metal) accelerator to prefer instead. Pure so it
  * can be unit-tested without spawning anything.
  *
@@ -137,8 +144,8 @@ function writeLaunchAgent(required = REQUIRED) {
 
 /**
  * Read the *persisted* value of a var (user-scope on Windows, launchd on macOS).
- * Best-effort: returns '' when unset or unreadable. `name` is always one of the
- * REQUIRED keys — a fixed constant, never user input.
+ * Best-effort: returns '' when unset or unreadable. `name` is always a REQUIRED,
+ * INTEL_ACCEL or RETIRED key — a fixed constant, never user input.
  */
 async function currentValue(name) {
   try {
@@ -161,23 +168,42 @@ async function currentValue(name) {
 }
 
 /**
+ * Pure: which RETIRED vars are still persisted with the value an earlier build
+ * wrote (and so should be removed)?
+ *
+ * @param {Record<string,string>} current persisted name → value (missing = '').
+ * @returns {string[]}
+ */
+function computeRetired(current, retired = RETIRED) {
+  return Object.entries(retired)
+    .filter(([name, value]) => (current[name] || '') === value)
+    .map(([name]) => name);
+}
+
+/**
  * Pure decision: given a map of the currently-persisted values, is any REQUIRED
- * var missing or wrong? Split out from `needsSetup` so it can be unit-tested
- * without spawning `setx`/`launchctl`.
+ * var missing or wrong, or any RETIRED value still present? Split out from
+ * `needsSetup` so it can be unit-tested without spawning `setx`/`launchctl`.
  *
  * @param {Record<string,string>} current persisted name → value (missing = '').
  */
-function computeNeedsSetup(current, required = REQUIRED) {
-  return Object.entries(required).some(([name, value]) => (current[name] || '') !== value);
+function computeNeedsSetup(current, required = REQUIRED, retired = RETIRED) {
+  return Object.entries(required).some(([name, value]) => (current[name] || '') !== value)
+    || computeRetired(current, retired).length > 0;
 }
 
-/** True if any var in `required` is not already persisted with its target value. */
-async function needsSetup(required = REQUIRED) {
+/** Read the persisted value of every REQUIRED-set and RETIRED var. */
+async function readCurrent(required = REQUIRED) {
   const current = {};
-  for (const name of Object.keys(required)) {
+  for (const name of [...Object.keys(required), ...Object.keys(RETIRED)]) {
     current[name] = await currentValue(name);
   }
-  return computeNeedsSetup(current, required);
+  return current;
+}
+
+/** True if any var in `required` is not persisted with its target value, or a RETIRED value remains. */
+async function needsSetup(required = REQUIRED) {
+  return computeNeedsSetup(await readCurrent(required), required);
 }
 
 async function persistWindows(required = REQUIRED, onLine = () => {}) {
@@ -203,6 +229,27 @@ async function persistMac(required = REQUIRED, onLine = () => {}) {
   if (code !== 0) throw new Error(`launchctl load failed: ${stderr.trim()}`);
 }
 
+/**
+ * Remove retired vars from the persisted OS environment. `setx` cannot delete,
+ * so Windows clears the user-scope value via .NET. On macOS the rewritten login
+ * agent no longer sets them, so only the current session needs `unsetenv`.
+ * `names` are RETIRED keys — fixed constants, never user input.
+ */
+async function unsetRetired(names, onLine = () => {}) {
+  for (const name of names) {
+    onLine(`Removing ${name}…`);
+    if (process.platform === 'win32') {
+      const { code, stderr } = await run('powershell', [
+        '-NoProfile', '-Command',
+        `[Environment]::SetEnvironmentVariable('${name}',$null,'User')`,
+      ]);
+      if (code !== 0) throw new Error(`Removing ${name} failed: ${stderr.trim()}`);
+    } else if (process.platform === 'darwin') {
+      await run('launchctl', ['unsetenv', name]).catch(() => {});
+    }
+  }
+}
+
 /** Poll until the Ollama daemon is no longer answering, or the retries run out. */
 async function waitForStopped(retries = 12, delayMs = 500) {
   const ollama = loadOllama();
@@ -217,8 +264,10 @@ async function waitForStopped(retries = 12, delayMs = 500) {
  * Quit the running Ollama app and relaunch it so it re-reads the env vars we
  * just persisted. Returns true once the daemon is reachable again, false if we
  * couldn't relaunch it (the caller then asks the user to restart Ollama).
+ * `retired` names are stripped from the relaunched daemon's env: Electron may
+ * itself have inherited them from the environment it was launched with.
  */
-async function restartOllama(required = REQUIRED, onLine = () => {}) {
+async function restartOllama(required = REQUIRED, onLine = () => {}, retired = []) {
   onLine('Restarting Ollama to apply the new settings…');
   if (process.platform === 'darwin') {
     await run('osascript', ['-e', 'tell application "Ollama" to quit']).catch(() => {});
@@ -236,7 +285,9 @@ async function restartOllama(required = REQUIRED, onLine = () => {}) {
       process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama app.exe',
     );
     if (!fs.existsSync(exe)) return false;
-    spawnDetached(exe, [], { ...process.env, ...required });
+    const env = { ...process.env, ...required };
+    for (const name of retired) delete env[name];
+    spawnDetached(exe, [], env);
   } else {
     return false;
   }
@@ -248,12 +299,13 @@ async function restartOllama(required = REQUIRED, onLine = () => {}) {
  *
  * Idempotent and cheap on the warm path: if every value is already persisted it
  * returns immediately without touching the running daemon. Only when something
- * is missing does it write the values and restart Ollama.
+ * is missing, or a RETIRED value is still persisted, does it write/remove the
+ * values and restart Ollama.
  *
  * On an Intel-only GPU host it additionally persists the iGPU-enable vars
  * (INTEL_ACCEL) so Ollama offloads to the integrated Arc/Iris GPU instead of
  * dropping it and falling back to CPU. NVIDIA/Apple hosts get only the base
- * three, unchanged.
+ * set, unchanged.
  *
  * @param {(msg:string)=>void} onLine progress sink for wizard messages.
  * @param {{intel?:boolean, nvidia?:boolean, apple?:boolean}} [gpuInfo] detected
@@ -268,24 +320,29 @@ async function ensure(onLine = () => {}, gpuInfo) {
 
   const info = gpuInfo || (await require('./gpu').detect());
   const required = resolveVars(info);
-  if (!(await needsSetup(required))) return { supported: true, changed: false, restarted: false };
+  const current = await readCurrent(required);
+  if (!computeNeedsSetup(current, required)) return { supported: true, changed: false, restarted: false };
+  const retired = computeRetired(current);
 
   onLine('Applying required Ollama settings…');
   if (process.platform === 'win32') await persistWindows(required, onLine);
   else await persistMac(required, onLine);
+  await unsetRetired(retired, onLine);
 
-  const restarted = await restartOllama(required, onLine);
+  const restarted = await restartOllama(required, onLine, retired);
   return { supported: true, changed: true, restarted };
 }
 
 module.exports = {
   REQUIRED,
   INTEL_ACCEL,
+  RETIRED,
   LAUNCH_AGENT_LABEL,
   resolveVars,
   ensure,
   needsSetup,
   computeNeedsSetup,
+  computeRetired,
   currentValue,
   restartOllama,
   launchAgentPath,

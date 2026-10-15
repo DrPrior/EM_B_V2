@@ -15,6 +15,7 @@ from neo4j import Session  # type: ignore[import-untyped]
 
 # Local imports
 from src.core.config import settings
+from src.core.logging_config import configure_logging
 from src.database.connection import Neo4jConnection
 from src.services.embeddings import embed_and_store_chunk
 
@@ -524,6 +525,9 @@ def ingest_project_data(
 
 
 if __name__ == "__main__":
+    # Timing/extraction loggers have no handler of their own; install the
+    # shared one (console, or LOG_DIR files) so their output isn't dropped.
+    configure_logging()
     # Standalone execution: initialize connection and ingest
     nc = Neo4jConnection.get_instance()
     try:

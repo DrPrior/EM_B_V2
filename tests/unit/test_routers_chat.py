@@ -1,5 +1,6 @@
 """Unit tests for the chat router (RAG service + Neo4j mocked)."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -122,3 +123,36 @@ def test_delete_session_not_found(client: TestClient) -> None:
         resp = client.delete("/chat/sessions/abc")
 
     assert resp.status_code == 404
+
+
+def test_chat_unexpected_error_is_logged(client: TestClient, caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="em_b")
+    with patch.object(
+        chat_router.rag_service, "answer_question", side_effect=RuntimeError("boom")
+    ):
+        resp = client.post("/chat/", json={"question": "hi", "session_id": "s-1"})
+
+    assert resp.status_code == 500
+    (record,) = caplog.records
+    assert record.name == "em_b.chat"
+    assert "s-1" in record.getMessage()
+    assert record.exc_info is not None
+
+
+def test_chat_stream_mid_response_failure_is_logged(client: TestClient, caplog) -> None:
+    def failing_tokens():
+        yield "A"
+        raise RuntimeError("ollama dropped")
+
+    caplog.set_level(logging.ERROR, logger="em_b")
+    with patch.object(
+        chat_router.rag_service,
+        "stream_answer",
+        return_value=("sid-5", [], failing_tokens()),
+    ):
+        resp = client.post("/chat/stream", json={"question": "hi"})
+
+    assert '"type": "error"' in resp.text
+    (record,) = caplog.records
+    assert "mid-response" in record.getMessage()
+    assert "sid-5" in record.getMessage()

@@ -3,7 +3,7 @@
 /**
  * Filesystem locations for the desktop app.
  *
- * Bundled resources (the compose file, Modelfiles, asset manifest) live under
+ * Bundled resources (Modelfiles, asset manifest) live under
  * process.resourcesPath when packaged, or the repo root during `npm start`.
  * Per-install state (generated env file, cached downloads, first-run marker)
  * lives under Electron's userData dir so it survives app updates.
@@ -18,10 +18,6 @@ function resourcesRoot() {
   return app.isPackaged
     ? process.resourcesPath
     : path.join(__dirname, '..', '..');
-}
-
-function composePath() {
-  return path.join(resourcesRoot(), 'docker-compose.desktop.yml');
 }
 
 function modelfilePath(name) {
@@ -60,6 +56,14 @@ function envFilePath() {
 /** Marker written once the guided first-run provisioning has fully succeeded. */
 function firstRunMarkerPath() {
   return path.join(userDataDir(), 'first-run-complete.json');
+}
+
+/**
+ * Rotating log files: electron.log (shell + child output) and api.log (handed to
+ * the API as LOG_DIR). The folder a user sends when reporting a problem.
+ */
+function logsDir() {
+  return path.join(userDataDir(), 'logs');
 }
 
 // --- Native runtime locations (decontainerized) ---------------------------
@@ -108,7 +112,6 @@ function apiExePath() {
 
 module.exports = {
   resourcesRoot,
-  composePath,
   modelfilePath,
   assetsManifestPath,
   userDataDir,
@@ -117,6 +120,7 @@ module.exports = {
   snapshotDir,
   envFilePath,
   firstRunMarkerPath,
+  logsDir,
   neo4jHomeDir,
   neo4jBinDir,
   neo4jConsolePath,

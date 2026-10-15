@@ -1,5 +1,6 @@
 """Unit tests for the admin ingestion router (pipeline + Neo4j mocked)."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -59,3 +60,17 @@ def test_ingest_failure_returns_500(client: TestClient) -> None:
         resp = client.post("/admin/ingest")
 
     assert resp.status_code == 500
+
+
+def test_ingest_failure_is_logged(client: TestClient, caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="em_b")
+    with patch.object(
+        admin_router, "ingest_project_data", side_effect=RuntimeError("disk gone")
+    ):
+        resp = client.post("/admin/ingest", json={"data_root": "C:/corpus"})
+
+    assert resp.status_code == 500
+    (record,) = caplog.records
+    assert record.name == "em_b.admin"
+    assert "C:/corpus" in record.getMessage()
+    assert record.exc_info is not None

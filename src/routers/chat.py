@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Generator, Iterator
 
 from fastapi import (  # type: ignore[import-untyped]
@@ -18,6 +19,7 @@ from src.services.rag import RAGService
 from src.services.session import Message, conversation_store
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+logger = logging.getLogger("em_b.chat")
 rag_service = RAGService()
 
 
@@ -136,6 +138,7 @@ def chat_with_graph(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Chat request failed (session_id=%s)", payload.session_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat request: {str(e)}",
@@ -164,6 +167,7 @@ def chat_stream(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Chat stream setup failed (session_id=%s)", payload.session_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to prepare stream: {str(e)}",
@@ -176,6 +180,9 @@ def chat_stream(
             for token in token_iter:
                 yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"
         except Exception as e:
+            # Headers are already sent, so this never becomes a 500 — without
+            # this record a mid-stream failure would leave no server-side trace.
+            logger.exception("Chat stream failed mid-response (session_id=%s)", sid)
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             return
         yield f"data: {json.dumps({'type': 'done'})}\n\n"

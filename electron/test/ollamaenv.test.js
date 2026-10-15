@@ -16,9 +16,8 @@ const path = require('node:path');
 
 const ollamaenv = require('../lib/ollamaenv');
 
-test('REQUIRED carries the host connectivity, warmth, and throughput vars', () => {
+test('REQUIRED carries the warmth and throughput vars', () => {
   assert.deepEqual(ollamaenv.REQUIRED, {
-    OLLAMA_HOST: '0.0.0.0',
     OLLAMA_KEEP_ALIVE: '-1',
     OLLAMA_MAX_LOADED_MODELS: '2',
     OLLAMA_FLASH_ATTENTION: '1',
@@ -29,6 +28,26 @@ test('REQUIRED carries the host connectivity, warmth, and throughput vars', () =
 
 test('REQUIRED is frozen (target values are constants, not mutated at runtime)', () => {
   assert.ok(Object.isFrozen(ollamaenv.REQUIRED));
+});
+
+test('REQUIRED does not bind Ollama to every interface (native API uses loopback)', () => {
+  assert.equal('OLLAMA_HOST' in ollamaenv.REQUIRED, false);
+  assert.equal('OLLAMA_HOST' in ollamaenv.INTEL_ACCEL, false);
+});
+
+test('RETIRED targets the Docker-era OLLAMA_HOST=0.0.0.0 and is frozen', () => {
+  assert.deepEqual(ollamaenv.RETIRED, { OLLAMA_HOST: '0.0.0.0' });
+  assert.ok(Object.isFrozen(ollamaenv.RETIRED));
+});
+
+test('computeRetired: flags a value an earlier build persisted', () => {
+  assert.deepEqual(ollamaenv.computeRetired({ OLLAMA_HOST: '0.0.0.0' }), ['OLLAMA_HOST']);
+});
+
+test('computeRetired: leaves unset or user-chosen values alone', () => {
+  assert.deepEqual(ollamaenv.computeRetired({}), []);
+  assert.deepEqual(ollamaenv.computeRetired({ OLLAMA_HOST: '' }), []);
+  assert.deepEqual(ollamaenv.computeRetired({ OLLAMA_HOST: '127.0.0.1:11500' }), []);
 });
 
 test('INTEL_ACCEL carries the iGPU-enable vars and is frozen', () => {
@@ -62,7 +81,6 @@ test('resolveVars: no GPU info → base three only', () => {
 test('resolveVars does not mutate REQUIRED', () => {
   ollamaenv.resolveVars({ intel: true });
   assert.deepEqual(ollamaenv.REQUIRED, {
-    OLLAMA_HOST: '0.0.0.0',
     OLLAMA_KEEP_ALIVE: '-1',
     OLLAMA_MAX_LOADED_MODELS: '2',
     OLLAMA_FLASH_ATTENTION: '1',
@@ -83,13 +101,23 @@ test('computeNeedsSetup: extra unrelated vars do not force setup', () => {
 
 test('computeNeedsSetup: true when a var is missing', () => {
   const missing = { ...ollamaenv.REQUIRED };
-  delete missing.OLLAMA_HOST;
+  delete missing.OLLAMA_KEEP_ALIVE;
   assert.equal(ollamaenv.computeNeedsSetup(missing), true);
 });
 
 test('computeNeedsSetup: true when a var holds the wrong value', () => {
-  const wrong = { ...ollamaenv.REQUIRED, OLLAMA_HOST: '127.0.0.1' };
+  const wrong = { ...ollamaenv.REQUIRED, OLLAMA_NUM_PARALLEL: '4' };
   assert.equal(ollamaenv.computeNeedsSetup(wrong), true);
+});
+
+test('computeNeedsSetup: true when a retired value is still persisted', () => {
+  const stale = { ...ollamaenv.REQUIRED, OLLAMA_HOST: '0.0.0.0' };
+  assert.equal(ollamaenv.computeNeedsSetup(stale), true);
+});
+
+test('computeNeedsSetup: a user-chosen OLLAMA_HOST does not force setup', () => {
+  const custom = { ...ollamaenv.REQUIRED, OLLAMA_HOST: '127.0.0.1:11500' };
+  assert.equal(ollamaenv.computeNeedsSetup(custom), false);
 });
 
 test('computeNeedsSetup: empty string counts as unset', () => {
@@ -117,6 +145,7 @@ test('launchAgentPlist declares RunAtLoad and every REQUIRED setenv', () => {
     // The plist runs `launchctl setenv <NAME> <VALUE>` for each var.
     assert.match(plist, new RegExp(`launchctl setenv ${name} ${value.replace('.', '\\.')}`));
   }
+  assert.doesNotMatch(plist, /OLLAMA_HOST/);
 });
 
 test('launchAgentPlist is a well-formed plist document', () => {

@@ -8,9 +8,10 @@ Neo4j (native, bolt 127.0.0.1:7687)  +  Ollama (native, 127.0.0.1:11434)  +  API
 ```
 
 > **Status:** the app code is native-safe (paths normalized, endpoints on
-> localhost). What is *not* yet automated: installing native Neo4j (below is a
-> manual runbook) and packaging the API (that's Workstream C/D). This is the
-> developer path; end-user desktop packaging comes later.
+> localhost), and so are the Electron shell and the build scripts. What is *not*
+> automated: installing native Neo4j for dev (below is a manual runbook). This is
+> the developer path; for end-user packaging see
+> [`DECONTAINERIZE_PLAN.md`](DECONTAINERIZE_PLAN.md).
 
 ## 1. Python environment
 
@@ -23,22 +24,38 @@ python -m pip install -r requirements-dev.txt
 
 ## 2. Ollama (host-native)
 
-Already covered by [`HYBRID_SETUP.md`](HYBRID_SETUP.md) §1. **Difference for
-native:** you do **not** need `OLLAMA_HOST=0.0.0.0` — the API now talks to Ollama
-over `127.0.0.1`, so Ollama can stay on its default loopback bind. Keep the
-warmth/perf vars (`OLLAMA_KEEP_ALIVE=-1`, `OLLAMA_MAX_LOADED_MODELS=2`, etc.).
-The API builds the `chat-model` / `embedding-model` variants on startup.
+Install it and set the warmth/perf vars per
+[`HYBRID_SETUP.md`](HYBRID_SETUP.md) §1–2 (`OLLAMA_KEEP_ALIVE=-1`,
+`OLLAMA_MAX_LOADED_MODELS=2`, etc.). Do **not** set `OLLAMA_HOST=0.0.0.0` — the
+API talks to Ollama over `127.0.0.1`, so Ollama stays on its default loopback
+bind; that variable was a container-era requirement. The API builds the
+`chat-model` / `embedding-model` variants on startup.
 
 ## 3. Neo4j (native)
 
-Install a native Neo4j server. **Recommended: Neo4j Community 2026.04.0** — the
-same line the shipped `neo4j.dump` was exported from, so a native install can
-load that dump later without a store-format mismatch (the version lock in
-`DECONTAINERIZE_PLAN.md` §C). Neo4j needs a **JRE (17/21)**; either use a
-distribution that bundles one or install Java separately.
+Install a native Neo4j server on the **`2026.08.x`** line. That's what the
+desktop app ships (Community 2026.08.1) and what the maintainer's dev DBMS runs,
+so dumps move between them without a store-format mismatch (see
+`DECONTAINERIZE_PLAN.md`, *C. as built*). Neo4j needs a **JRE 17 or 21**, not
+newer: either use a distribution that bundles one or install Java separately.
 
-Options: the Community **tarball/zip** (unpack, no admin — closest to what the
-desktop app will bundle) or **Neo4j Desktop** (GUI, easier for dev).
+**Upgrading an existing dev DBMS** (as done 2026-09-18, 2026.07.1 → 2026.08.1):
+stop it, back it up (`bin\neo4j-admin database dump neo4j --to-path=<dir>`, and
+the same for `system`), then use Neo4j Desktop's **Upgrade**. Keep the store
+format (`aligned`) if asked; never `block`. Start it, then **make one write**:
+a user database stays on the old kernel version until its first write
+transaction, so read-only checks look finished when they aren't. A net-zero
+write does it, `CREATE (n:__Probe) WITH n DELETE n`. Confirm `Upgrade
+transaction from … to … completed` for `neo4j` in `logs\debug.log`.
+
+Options: the Community **zip** (unpack, no admin — closest to what the desktop
+app bundles) or **Neo4j Desktop** (GUI, easier for dev).
+
+> ⚠️ **Community vs Enterprise matters for dumps.** Neo4j Desktop installs
+> **Enterprise**, which defaults to the `block` store format. A dump taken from it
+> **cannot be loaded by Community**, which is what the desktop app ships. Dev on
+> Desktop is fine, but any dump you intend to ship must be re-exported in a record
+> (aligned/standard) format.
 
 Set the password to match `NEO4J_AUTH` in your `.env` **before first start**
 (Neo4j bakes the password into its data dir on first init):
@@ -77,10 +94,14 @@ python -m pipeline.enrich
 `File.filepath` is stored forward-slashed and keyed to your `DATA_ROOT`, so
 citation `/files/...` links resolve to your local corpus.
 
-> **Why not just load the shipped `neo4j.dump`?** Its `File.filepath` values are
-> keyed to the container path `/app/project_data`, which doesn't exist on a
-> Windows host — citation links wouldn't resolve. Re-keying/serving the shipped
-> dump natively is a Workstream C task. For dev, a fresh ingest is self-consistent.
+> **Loading the shipped `neo4j.dump` instead?** That works now. Its
+> `File.filepath` values are absolute paths from the maintainer's machine
+> (`C:/Users/seprior/EM_B_Hybrid/project_data/...`, all 147 files). If your
+> `DATA_ROOT` isn't exactly that path, `_file_url` (`src/services/rag.py`) maps
+> each one via the part after `project_data/`. So citations resolve as long as
+> your `DATA_ROOT` points at a folder holding the same corpus. Before this
+> fallback (release 0.4.0) such links were refused with HTTP 403. A fresh ingest
+> with your own `DATA_ROOT` is still the self-consistent option for development.
 
 ## 6. Run the API
 

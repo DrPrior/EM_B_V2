@@ -39,27 +39,44 @@ ollama --version
 
 ## 2. Ollama environment variables
 
-Set these as **user or system environment variables** (not per-session — they
-must survive a reboot) so the models stay warm and co-resident:
+Set these as **user or system environment variables** (not per-session; they
+must survive a reboot). This is the complete set the app checks for
+(`REQUIRED` in `electron/lib/ollamaenv.js`). If any one is missing or different,
+the app sets it and restarts Ollama on first run. So set **all five**; a partial
+set still triggers the restart this step exists to avoid.
 
 | Variable | Value | Why |
 |---|---|---|
-| `OLLAMA_KEEP_ALIVE` | `-1` | Keep models resident — otherwise every query pays a multi-second reload |
+| `OLLAMA_KEEP_ALIVE` | `-1` | Keep models resident; otherwise every query pays a multi-second reload |
 | `OLLAMA_MAX_LOADED_MODELS` | `2` | Hold the chat *and* embedding model at once |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Faster prompt processing; harmless where unsupported |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | Roughly halves KV-cache memory (needs flash attention) |
+| `OLLAMA_NUM_PARALLEL` | `1` | One inference slot; stops mid-session model reloads on shared-memory GPUs |
 
 ```powershell
 setx OLLAMA_KEEP_ALIVE -1
 setx OLLAMA_MAX_LOADED_MODELS 2
+setx OLLAMA_FLASH_ATTENTION 1
+setx OLLAMA_KV_CACHE_TYPE q8_0
+setx OLLAMA_NUM_PARALLEL 1
 ```
 
-**No `OLLAMA_HOST=0.0.0.0`** — the app is native and reaches Ollama over
-`127.0.0.1`, so Ollama stays on its default loopback bind (no LAN exposure, no
-firewall hardening needed). On Intel integrated GPUs you may also need
-`OLLAMA_IGPU_ENABLE=1` (the wizard sets it there). **Restart Ollama afterward**
-(quit from the system tray, reopen) so it picks the variables up.
+**Intel-only machines** (an Intel Arc / Iris Xe GPU and no NVIDIA card) also need
+these two. The app adds them only on such machines. Don't set them on NVIDIA hosts:
 
-Skipping this isn't fatal — the app sets them itself — but then it force-quits
-and relaunches Ollama, one more thing for endpoint security to notice.
+```powershell
+setx OLLAMA_VULKAN 1
+setx OLLAMA_IGPU_ENABLE 1
+```
+
+**No `OLLAMA_HOST=0.0.0.0`.** The app is native and reaches Ollama over
+`127.0.0.1`, so Ollama stays on its default loopback bind (no LAN exposure, no
+firewall hardening needed). If an older build left `OLLAMA_HOST=0.0.0.0` in the
+user environment, the app removes it. **Restart Ollama afterward** (quit from the
+system tray, reopen) so it picks the variables up.
+
+Skipping this isn't fatal, because the app sets them itself. But then it
+force-quits and relaunches Ollama, one more thing for endpoint security to notice.
 
 ## 3. Base models
 
@@ -85,7 +102,10 @@ settings. Building them in-app is local and fast — you give up nothing.
 ```powershell
 ollama --version                                                # a version
 ollama list                                                     # both base models
-[Environment]::GetEnvironmentVariable('OLLAMA_KEEP_ALIVE','User')  # -1
+'OLLAMA_KEEP_ALIVE','OLLAMA_MAX_LOADED_MODELS','OLLAMA_FLASH_ATTENTION',
+'OLLAMA_KV_CACHE_TYPE','OLLAMA_NUM_PARALLEL' |
+  ForEach-Object { "{0,-26} {1}" -f $_, [Environment]::GetEnvironmentVariable($_,'User') }
+# expect: -1, 2, 1, q8_0, 1
 ```
 
 `ollama list` should show `gemma4:12b-it-qat` and `embeddinggemma:latest`. If
@@ -114,14 +134,40 @@ needed again afterward.
 ## Known limitation: unsigned binaries are blocked
 
 Prepping the machine does **not** get the app past a "blocked by your system
-administrator" block. On these machines **WDAC Code Integrity is enforced** (and
-AppLocker is active), so an **unsigned** executable — the installer *and* the
-bundled `emb-api.exe` — is refused execution outright. It is a policy block, not
-a privilege one: running as Administrator does not bypass it.
+administrator" block. It is a policy block, not a privilege one: running as
+Administrator does not bypass it.
 
-That needs a code-signing certificate. The build is configured for one
-(`electron/package.json` → `win.signtoolOptions`; `build-release.ps1 -CertSubject`
-signs `emb-api.exe`), publisher *University of Arkansas at Little Rock*. Until the
-certificate is supplied, the build ships unsigned and will not run on the fleet.
-Machine prep quiets endpoint security *after* install; signing is what lets it run
-at all.
+**What was observed** (UALR-managed Windows 11, 2026-09-17): launching the bundled
+`emb-api.exe` fails with a bare `Access is denied.` The cause is Microsoft
+Defender **Attack Surface Reduction** rule `01443614-CD74-433A-B99E-2ECDC07BFC25`,
+*"Block executable files from running unless they meet a prevalence, age, or
+trusted list criterion"*, in Block mode. It shows up as event **1121** in
+`Microsoft-Windows-Windows Defender/Operational`, and **not** in the AppLocker log.
+The rule is deployed by policy (Intune), so `Get-MpPreference` doesn't list it.
+
+```powershell
+Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" |
+  Where-Object Id -eq 1121 | Select-Object -First 5 TimeCreated, Message
+```
+
+**What needs signing.** Microsoft describes this rule as covering `.dll` files as
+well as `.exe`, so signing the app's main exe alone may not be enough. An audit
+of v0.4.0 (2026-09-23) found **31 unsigned binaries**; everything else ships
+vendor-signed (the Java runtime by Eclipse, Neo4j by Apache, most of the Python
+runtime by Anaconda/Microsoft):
+
+| Where | Unsigned files |
+|---|---|
+| Installer | `EM Knowledge Assistant-Setup-0.4.0.exe` |
+| Desktop app | `EM Knowledge Assistant.exe`, `resources\elevate.exe`, `ffmpeg.dll`, `libEGL.dll`, `libGLESv2.dll`, `vk_swiftshader.dll`, `vulkan-1.dll`, `dxcompiler.dll` |
+| API bundle (`emb-api.zip`) | `emb-api.exe` + 21 `.dll`/`.pyd` under `_internal\` (OpenSSL, `pydantic_core`, `cryptography`, `lxml`, `pywin32`, `psutil`, `wrapt`, `yaml`, PIL's `_avif`) |
+
+The fix is one of: sign all 31 with the UALR certificate; get the certificate onto
+the organization's trusted list (a brand-new certificate can still fail the
+rule's *prevalence* test); or have IT exclude the app's install folder from this
+rule. The build is prepared for signing (`electron/package.json` →
+`win.signtoolOptions`, publisher *University of Arkansas at Little Rock*). But
+`build-release.ps1 -CertSubject` currently signs **only `emb-api.exe`**, and needs
+extending to cover the `_internal` binaries once the certificate exists. Until
+then, the build is unsigned and will not run on the fleet. Machine prep quiets
+endpoint security *after* install; signing is what lets it run at all.

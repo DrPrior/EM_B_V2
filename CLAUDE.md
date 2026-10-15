@@ -2,32 +2,65 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> ## ⚠️ Decontainerization: API done, packaging remains
+> ## ⚠️ Decontainerized — release 0.4.0 built, code-signing remains
 >
 > The organization (UALR) no longer permits Docker, so the app runs as **native
 > host processes** — no container runtime at all, every service on `127.0.0.1`.
 >
 > **The Docker files are gone from this repo** (`Dockerfile`, `Dockerfile.prod`,
 > `docker-compose.yml`, `docker-compose.desktop.yml` were deleted in `fdb0c6e`).
-> The Python API, the pipeline, and the dev flow are fully native today. `docker
-> compose up` / `docker exec` no longer work — if you find a doc or comment that
-> tells you to run them, it is stale.
+> The Python API, the pipeline, the dev flow, the Electron shell, and the build
+> scripts are all native today. `docker compose up` / `docker exec` no longer
+> work — if you find a doc or comment that tells you to run them, it is stale.
 >
 > - **Canonical plan + pitfalls:** [`docs/DECONTAINERIZE_PLAN.md`](docs/DECONTAINERIZE_PLAN.md) — read before migration work.
 > - **Dev runbook:** [`docs/NATIVE_DEV.md`](docs/NATIVE_DEV.md).
-> - **Remaining:** Workstream C (bundle native Neo4j + JRE), D (Electron rewrite), E (build/release pipeline).
-> - **The Electron shell is currently non-functional.** `electron/supervisor.js`
->   and `electron/lib/{docker,compose,snapshot,firstrun,assets}.js` still drive the
->   deleted Docker stack. It must be rewritten (Workstream D) before it runs again.
+> - **Landed:** A (app native-safety), B (native dev stack), D (Electron native
+>   supervisor + first-run), E (freeze spec + build/release scripts). `lib/docker.js`
+>   and `lib/compose.js` are deleted; [electron/lib/procs.js](electron/lib/procs.js) spawns Neo4j and the
+>   frozen API directly.
+> - **Release 0.4.0 is built** (2026-09-18): Neo4j Community **2026.08.1** +
+>   Temurin **JRE 21** staged at `C:\stage\{neo4j,jre}` by `scripts/stage-neo4j.ps1`,
+>   release assets in `release/`, their checksums committed in
+>   `electron/resources/assets.manifest.json` (#36), installer in `electron/dist/`.
+>   An audit on 2026-09-23 passed: tests, secrets sweep, loopback-only binds,
+>   `/files` traversal guard, and a live run from source. **But the 0.4.0
+>   installer is invalid** (0.2 MB stub; its app package was left as a separate
+>   `.nsis.7z`). The ASR rule below blocked electron-builder from executing the
+>   freshly built installer mid-build, so **`npm run dist:win` cannot produce a
+>   valid installer on this machine** without an ASR exclusion for the output
+>   folder. A valid installer is ~95 MB with a `.blockmap`. Two 0.4.0 problems
+>   are **fixed in code, pending the next build**: citation links failing (403) on
+>   end-user machines (`_file_url` now maps maintainer paths via
+>   `_relative_to_corpus`), and Neo4j usage reporting being on (`stage-neo4j.ps1`
+>   now turns it off; applied to `C:\stage\neo4j`). **Remaining:** rebuild as
+>   0.4.1 (on a machine where the ASR rule doesn't block the installer build),
+>   code-signing (with IT: **31 unsigned binaries**, listed in
+>   `docs/TARGET_MACHINE_PREP.md`), and a clean-machine first-run test.
+> - **The shipped dump is fine.** `release/neo4j.dump` is verified
+>   `record-aligned-1.1`, so Community can load it, even though dev runs
+>   Enterprise (whose `block` default it cannot). `backup-block/neo4j.dump` is the
+>   pre-migration `block-block-1.1` original. Note `neo4j-admin database load
+>   --info` reports only the *archive* format — to read the store format, load
+>   into a scratch `server.directories.data` and run `database info --from-path`.
+> - **⚠️ `dist/emb-api/emb-api.exe` cannot be run on this machine.** Defender ASR
+>   rule `01443614-CD74-433A-B99E-2ECDC07BFC25` ("block executable files unless
+>   they meet a prevalence, age, or trusted list criterion") is in Block mode
+>   under UALR policy, so launching it gives a bare `Access is denied.` with no
+>   traceback and nothing in AppLocker. Confirm with `Get-WinEvent -LogName
+>   "Microsoft-Windows-Windows Defender/Operational" | Where-Object Id -eq 1121`.
+>   The freeze can be *built* and inspected here, not executed. Don't chase it as
+>   a Python or PyInstaller bug.
 > - **Do not add new Docker coupling.** No `host.docker.internal`, no compose, no
 >   `/app/...` paths in new code.
 >
-> Working branch: `Decontainerize`.
+> Working branch: `Decontainerize` — cut task branches from it and PR back into
+> it, not into `main` (`main` trails it by many commits).
 
 ## Stack
 
-- **FastAPI** served by uvicorn as a native process on `127.0.0.1:8000` (a venv/conda env today; a frozen exe once Workstream E lands)
-- **Neo4j** — native server (needs a JRE 17/21), bolt on `127.0.0.1:7687`, browser on `127.0.0.1:7474`. Neo4j Desktop is the dev path; a bundled tarball is the ship path.
+- **FastAPI** served by uvicorn as a native process on `127.0.0.1:8000`: from a conda env in dev, and as the PyInstaller-frozen `emb-api.exe` in the shipped app
+- **Neo4j** — native server (needs a JRE 17/21), bolt on `127.0.0.1:7687`, browser on `127.0.0.1:7474`. Neo4j Desktop (Enterprise) is the dev path; a bundled Community zip plus a JRE is the ship path.
 - **Ollama** — native on the host, using the host GPU (Metal/CUDA/Vulkan) directly, on `127.0.0.1:11434`. Because the API is also native it reaches Ollama over plain `localhost`; Ollama does **not** need `OLLAMA_HOST=0.0.0.0` (that requirement existed only because the API was containerized).
 - **Static web UI** — chat interface served at `/` from [src/static/](src/static/) (index.html, app.js, style.css, vendored marked + tailwind — no CDN).
 
@@ -96,8 +129,39 @@ ruff format .
 ruff check .
 ```
 
-**Electron shell** (currently broken — see the banner): `cd electron; npm test`
-runs `node --test test/**/*.test.js`; `npm run dist:win` builds the NSIS installer.
+**Electron shell:** `cd electron; npm test` runs `node --test test/**/*.test.js`;
+`npm run dist:win` builds the NSIS installer.
+
+**Freeze the API** (one-dir bundle at `dist/emb-api/emb-api.exe` + `_internal/`):
+```powershell
+python -m PyInstaller emb-api.spec --noconfirm
+```
+Build it from the env that has the runtime deps (`pyAI`), not a bare system
+Python. [emb-api.spec](emb-api.spec) carries an `EXCLUDES` list because `python-pptx → PIL`
+optionally references IPython and Tk; without it a dev env leaks ~25 MB of
+notebook stack into the bundle.
+
+**Stage the Neo4j + JRE homes** that `build-release.ps1` consumes (unpack,
+configure for loopback, and optionally migrate + re-export the graph dump in a
+scratch data dir; the staged home itself is left with an empty `data\`):
+```powershell
+pwsh -File scripts/stage-neo4j.ps1 -Zip <neo4j-community-*.zip> -JreZip <jre.zip> `
+     -Dump .\release\neo4j.dump -ReExport
+```
+Neo4j Community downloads live at `https://dist.neo4j.org/neo4j-community-<version>-windows.zip`
+(plus `.sha256`). The Deployment Center UI lists **only the newest release**, so
+fetch older lines by direct URL rather than assuming they're gone.
+
+**Build the release assets** (frozen API + Neo4j + JRE + dump + corpus, then
+checksums into `electron/resources/assets.manifest.json`):
+```powershell
+pwsh -File electron/scripts/build-release.ps1 -Neo4jHome C:\stage\neo4j -JreHome C:\stage\jre `
+     -Python "$env:USERPROFILE\.conda\envs\pyAI\python.exe"   # NOT the system python on PATH
+cd electron; npm run dist:win          # bakes the manifest into the installer
+pwsh -File scripts/stage-usb.ps1 -Verify
+```
+Run them in that order — `stage-usb.ps1` fails if the installer carries a
+different manifest than `release/`, or if any asset's SHA-256 doesn't match.
 
 **Reset the graph** (drop all Chunk nodes before re-ingesting), in Neo4j Browser
 at `http://localhost:7474`:
@@ -151,8 +215,15 @@ the manifest load makes no LLM calls.
 
 Ingestion supports `.txt`, `.md`, `.pdf`, `.docx`, `.pptx`, and **excludes
 `MANIFEST*.md`** (that's corpus metadata, not content). `File.filepath` is stored
-in forward-slash (POSIX) form via `Path.as_posix()` so Windows ingestion, the
-`/files` URL space, and the shipped graph dump all agree.
+in forward-slash (POSIX) form via `Path.as_posix()`, so separators agree across
+Windows ingestion, the `/files` URL space and the shipped dump. But it is stored
+**absolute**, as the ingesting machine's path, so the shipped graph carries the
+maintainer's paths. `_file_url` (`src/services/rag.py`) strips `DATA_ROOT` when
+it's a prefix. Otherwise `_relative_to_corpus` keeps whatever follows the
+outermost `project_data` folder, and gives no link at all for a path it can't
+place. Without that fallback every citation link 403'd on end-user machines,
+which was the 0.4.0 bug; `tests/unit/test_file_url.py` pins it. Don't simplify
+it back to a prefix strip.
 
 [pipeline/extract.py](pipeline/extract.py) is **not** a standalone pipeline — it is a shared library
 called by both `enrich.py` (batch) and `rag.py` (per query, for entity extraction
@@ -215,8 +286,8 @@ Every chat request runs `_retrieve_and_build_messages()`:
 5. Merge: vector results first, graph results appended — deduped by both `chunk_id` and the first 200 chars of text
 6. Build `[system] + recent history + [user+context]` and hand to the LLM
 
-Graph traversal failures degrade gracefully to vector-only (the exception is
-swallowed). Streaming (`/chat/stream`) and non-streaming (`/chat/`) share the same
+Graph traversal failures degrade gracefully to vector-only, logged at WARNING
+with the traceback. Streaming (`/chat/stream`) and non-streaming (`/chat/`) share the same
 retrieval path. The token generator in `stream_answer()` stores the turn in
 session history via a `finally` block, so history survives an early client
 disconnect.
@@ -287,6 +358,9 @@ reads them from `os.environ` directly.
 | `data_root` | `/app/project_data` | Ingestion root **and** the base for `/files` citation links |
 | `ollama_base_url` | `http://localhost:11434` | Host-native Ollama |
 | `ollama_startup_retries` / `_delay` / `_request_timeout` / `_pull_timeout` | 5 / 3.0s / 10s / 1800s | Bootstrap retry + timeout budget (pull covers a ~10 GB cold download) |
+| `log_dir` | `None` | `LOG_DIR` — set (or running frozen) ⇒ rotating `api.log` files only; unset ⇒ console only. See Logging below |
+| `log_level` | `INFO` | Level for all `em_b.*` loggers. `DEBUG` also logs user question text |
+| `log_max_bytes` / `log_backup_count` | 10 MB / 5 | `api.log` rotation size and backups kept |
 | `timing_log_enabled` | `True` | Master switch for per-stage query timing logs (`em_b.timing` logger) |
 | `timing_log_level` | `INFO` | Log level for the timing logger |
 
@@ -304,6 +378,38 @@ extract_entities / graph_query) plus one `ollama call=… …` line per Ollama c
 carrying the model's internal `load`/`prompt_eval`/`eval` durations — correlated
 by a short `sid`. Use these to attribute query latency and to confirm models stay
 warm (low `load=` ms) under `OLLAMA_KEEP_ALIVE`.
+
+### Logging ([src/core/logging_config.py](src/core/logging_config.py), [electron/lib/logger.js](electron/lib/logger.js))
+
+Every Python logger is `logging.getLogger("em_b.<area>")` (`em_b.main`, `em_b.rag`,
+`em_b.chat`, `em_b.timing`, …). **Modules never attach handlers.** `configure_logging()`
+installs the single handler on `em_b`; it runs first in the lifespan and at the top
+of each `pipeline/*.py` `__main__` block. Anything new that runs standalone must call
+it too, or its INFO records are silently dropped.
+
+One destination, never both:
+
+- **Console** — dev (`dev-up.ps1`, `uvicorn --reload`, `python -m pipeline.*`).
+- **Rotating files** — when `LOG_DIR` is set or the app is frozen. `api.log` gets the
+  `em_b.*` records **and** uvicorn's loggers, rerouted because `uvicorn.run` installs
+  console handlers before the lifespan. Set `LOG_DIR` in dev to test this path.
+
+The Electron shell mirrors this: `electron.log` (shell events, wizard step
+transitions, Neo4j and API child stdout/stderr) in `<userData>/logs` when packaged,
+the console in dev unless `LOG_DIR` is set. It passes that dir to the API as
+`LOG_DIR`, so **one folder holds both files**. That's what a user sends when reporting
+a problem. The two files share a line format.
+
+Rules for new code:
+
+- **Log before raising `HTTPException` from a broad `except`**: `logger.exception(...)`.
+  The HTTP body reaches the client, not the log.
+- **Never swallow silently.** A graceful fallback logs WARNING with `exc_info=True`.
+- **Privacy:** user question text only at DEBUG; retrieved chunk text never. INFO
+  and above carry ids, filenames, scores, counts, timings, so a default-level log is
+  safe to send.
+- Tests: `tests/conftest.py` restores logger state after each test. Use
+  `caplog.set_level(..., logger="em_b")` to assert on records.
 
 ### Hot reload
 
@@ -333,10 +439,34 @@ Interactive API docs: `http://localhost:8000/docs`. The static UI is mounted at
 ### Desktop shell ([electron/](electron/))
 
 Electron main process + preload + a first-run wizard; supervises the backend and
-navigates to `http://127.0.0.1:8000` once `/health` is green. **Broken today** —
-`supervisor.js` and most of `lib/` still shell out to Docker/compose. Workstream D
-rewrites it to spawn native Neo4j and the frozen API directly. Tests use Node's
-built-in runner (`node --test`).
+navigates to `http://127.0.0.1:8000` once `/health` is green. Fully native:
+[supervisor.js](electron/supervisor.js) drives [lib/procs.js](electron/lib/procs.js), which spawns bundled Neo4j
+(`neo4j console`, `JAVA_HOME` = the bundled JRE) and the frozen `emb-api.exe`,
+probes bolt then `/health`, and kills both process trees on quit. Tests use
+Node's built-in runner (`node --test`).
+
+First run ([lib/firstrun.js](electron/lib/firstrun.js), step ids mirrored in [wizard/wizard.js](electron/wizard/wizard.js)):
+`gpu → ollama → models → neo4j → runtime → data → snapshot → start`. It unpacks
+the assets from a USB `assets/` folder ([lib/assets.js](electron/lib/assets.js)) into
+`<userData>/{neo4j,jre,api,project_data,snapshot}`, sets the Neo4j password
+**before** first init, loads the dump offline ([lib/snapshot.js](electron/lib/snapshot.js)), then starts
+the stack. [lib/apibundle.js](electron/lib/apibundle.js) re-unpacks the API bundle when a shipped
+manifest is newer than what's installed, so an app update can't leave the new
+shell running the old exe.
+
+**Tests** (`cd electron; npm test`, Node's built-in runner): `apibundle`,
+`logger`, `ollamaenv`, `procs`, `archive`, `envfile`, `snapshot`. They are
+hermetic — temp dirs, stub HTTP/TCP listeners, the real OS `tar`, no Electron.
+Modules that reach `lib/paths.js` need `test/electron-stub.js` first, because
+`paths.js` does `require('electron')` at module scope and outside Electron that
+export is a path string (so `app` is `undefined`). `supervisor.js` and
+`firstrun.js` have **no** unit tests — startup ordering, crash detection, orphan
+cleanup and the multi-GB unpack are only exercised by a real first run.
+
+When launching `electron .` from a VS Code terminal, clear `ELECTRON_RUN_AS_NODE`
+first (`Remove-Item Env:ELECTRON_RUN_AS_NODE`). The extension host sets it, which
+makes Electron run as plain Node, so `require('electron')` returns a path string and
+`app` is undefined.
 
 ## Coding Standards
 
@@ -345,11 +475,10 @@ These conventions are enforced across the codebase. Follow them in all new code.
 ### Python
 
 - **Type hints:** annotate every argument and return type, modern syntax (`list[str]`, `str | None` — not `List[str]`, `Optional[str]`)
-- **Dependency management:** install into your conda/venv with plain pip — `python -m pip install -r requirements.txt`. Do **not** run `uv pip install` against a conda env; uv treats it as a system Python and refuses unless pointed at it explicitly (`uv pip install --python "$env:CONDA_PREFIX\python.exe" ...`).
-  - **`requirements-dev.txt` is gitignored and not present in a fresh clone**, even though `docs/NATIVE_DEV.md` and `scripts/dev-up.ps1` reference it. Install dev tooling (`pytest`, `ruff`) yourself, or recreate the file locally.
+- **Dependency management:** install into your conda/venv with plain pip — `python -m pip install -r requirements-dev.txt` (runtime deps plus ruff, pytest, httpx, pyinstaller). Do **not** run `uv pip install` against a conda env; uv treats it as a system Python and refuses unless pointed at it explicitly (`uv pip install --python "$env:CONDA_PREFIX\python.exe" ...`).
 - **Formatting & linting:** Ruff, line length 88, `target-version = "py312"`. `ruff format` (Black-compatible) and `ruff check`. Rules `E,F,I,W,UP,B`; isort first-party = `src`, `pipeline`, `tests`. Config in [pyproject.toml](pyproject.toml).
 - **Docstrings:** Google-style for all modules, classes, and public functions
-- **String formatting:** f-strings exclusively — no `.format()` or `%`
+- **String formatting:** f-strings exclusively — no `.format()` or `%` — **except in logging calls**, which use lazy `%`-style args: `logger.info("Connected (version %s)", version)`, never `logger.info(f"...")`. The logging module only formats a record that passes the level filter, so per-query DEBUG lines cost nothing when disabled.
 - **Resource management:** always use context managers for file I/O and connections
 - **No mutable defaults**
 
@@ -379,9 +508,9 @@ These conventions are enforced across the codebase. Follow them in all new code.
 
 ### Deployment / process model
 
-- Startup order the shell must enforce: Neo4j (native server + bundled JRE) → wait for bolt → API (uvicorn now, frozen exe later) → poll `/health`. Ollama is host-native and only needs to be ensured running.
+- Startup order the shell must enforce: Neo4j (native server + bundled JRE) → wait for bolt → API (uvicorn in dev, the frozen exe when shipped) → poll `/health`. Ollama is host-native and only needs to be ensured running. Note `/health` goes green ~5 s **before** the vector index is usable: every API start drops and rebuilds `chunk_vector_idx` (`setup_constraints`), so a question asked in that window gets no retrieved context.
 - All endpoints bind `127.0.0.1` only. (`api_server.py` is a legacy alternate entry point that still binds `0.0.0.0` — don't use it; prefer `scripts/dev-up.ps1`.)
 - GPU acceleration comes entirely from the host's native Ollama install. The app has no GPU code of its own.
-- **Neo4j version is store-format-locked to `2026.07.01`** (the line the current graph was built on). A different major line can refuse to open the store — see the pitfall list in [docs/DECONTAINERIZE_PLAN.md](docs/DECONTAINERIZE_PLAN.md). Set the Neo4j password **before first init** (`neo4j-admin dbms set-initial-password`); it is baked into the data dir.
-- **Shipping the runtimes (open decision):** recommended — freeze the API with PyInstaller (one-dir) and code-sign it; ship native Neo4j + a bundled JRE unpacked. Installer signing is staged but blocked on a UALR certificate.
+- **The shipped Neo4j is Community `2026.08.1`**, and the shipped dump must be at its store format (currently `record-aligned-1.1`). Dev runs Enterprise `2026.08.1` (Neo4j Desktop, upgraded in place from 2026.07.1; pre-upgrade backup in `backup-dev-2026.07.1/`). Moving the shipped server between lines means `stage-neo4j.ps1 -Dump … -ReExport` (load → `migrate` → re-dump → verify). **After any Neo4j upgrade, a user database stays on the old kernel version until its first write transaction** — read-only checks will look done when it isn't; see *C. as built* in the plan. See the pitfall list in [docs/DECONTAINERIZE_PLAN.md](docs/DECONTAINERIZE_PLAN.md). Set the Neo4j password **before first init** (`neo4j-admin dbms set-initial-password`); it is baked into the data dir.
+- **Shipping the runtimes:** the API is frozen with PyInstaller (one-dir) and Neo4j + a JRE ship unpacked, all as USB assets. Signing is configured but blocked on a UALR certificate, and `build-release.ps1 -CertSubject` signs only `emb-api.exe`. The Defender ASR rule covers DLLs too, so it needs extending to the 21 unsigned `_internal` binaries before the cert is used.
 - All credentials via `.env` / environment — never hardcoded secrets.

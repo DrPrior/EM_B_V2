@@ -1,5 +1,7 @@
 """Unit tests for src.core.paths (from-source resolution)."""
 
+import sys
+
 import pytest
 
 from src.core import paths
@@ -24,3 +26,9 @@ def test_static_dir_exists_and_serves_ui() -> None:
     static = paths.static_dir()
     assert static.is_dir()
     assert (static / "index.html").is_file()
+
+
+def test_default_log_dir_is_none_from_source(monkeypatch) -> None:
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    assert paths.default_log_dir() is None

@@ -100,9 +100,9 @@
   <text x="616" y="248" class="d-m xs">Each router defines its own get_session().</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../src/main.py">main.py:87</a> registers the limiter and its 429 handler ·
+  <a class="ref" href="../../src/main.py">main.py:98</a> registers the limiter and its 429 handler ·
   <a class="ref" href="../../src/database/connection.py">connection.py:164</a> is the session
-  dependency generator · <a class="ref" href="../../src/routers/chat.py">chat.py:100</a> is the
+  dependency generator · <a class="ref" href="../../src/routers/chat.py">chat.py:102</a> is the
   read-only variant.
 </figcaption>
 </figure>
@@ -116,57 +116,57 @@
     <tr>
       <td><span class="tag post">POST</span> <code>/chat/</code></td>
       <td>Full answer in one response — <code>{answer, session_id, sources}</code>. Rate limited.</td>
-      <td><a class="ref" href="../../src/routers/chat.py">chat.py:108</a></td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:110</a></td>
     </tr>
     <tr>
       <td><span class="tag post">POST</span> <code>/chat/stream</code></td>
       <td>SSE: one <code>metadata</code> event, then <code>token</code> events, then <code>done</code> (or <code>error</code>). Rate limited.</td>
-      <td><a class="ref" href="../../src/routers/chat.py">chat.py:145</a></td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:148</a></td>
     </tr>
     <tr>
       <td><span class="tag get">GET</span> <code>/chat/sessions/{id}/history</code></td>
       <td>Full retained history for a session; 404 if unknown.</td>
-      <td><a class="ref" href="../../src/routers/chat.py">chat.py:186</a></td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:193</a></td>
     </tr>
     <tr>
       <td><span class="tag delete">DELETE</span> <code>/chat/sessions/{id}</code></td>
       <td>Drop a session. 204 on success, 404 if it never existed.</td>
-      <td><a class="ref" href="../../src/routers/chat.py">chat.py:198</a></td>
+      <td><a class="ref" href="../../src/routers/chat.py">chat.py:205</a></td>
     </tr>
     <tr>
       <td><span class="tag post">POST</span> <code>/admin/ingest</code></td>
       <td>Run the ingestion pipeline. Body <code>{"data_root": …}</code>, defaulting to the configured <code>data_root</code> (<code>DATA_ROOT</code>).</td>
-      <td><a class="ref" href="../../src/routers/admin.py">admin.py:66</a></td>
+      <td><a class="ref" href="../../src/routers/admin.py">admin.py:73</a></td>
     </tr>
     <tr>
       <td><span class="tag post">POST</span> <code>/admin/load-manifest</code></td>
       <td>Load MANIFEST*.md metadata. Run after ingest.</td>
-      <td><a class="ref" href="../../src/routers/admin.py">admin.py:86</a></td>
+      <td><a class="ref" href="../../src/routers/admin.py">admin.py:94</a></td>
     </tr>
     <tr>
       <td><span class="tag post">POST</span> <code>/admin/bootstrap-models</code></td>
       <td>Re-provision host Ollama models without restarting the API process. 503 if the daemon is unreachable.</td>
-      <td><a class="ref" href="../../src/routers/admin.py">admin.py:112</a></td>
+      <td><a class="ref" href="../../src/routers/admin.py">admin.py:121</a></td>
     </tr>
     <tr>
       <td><span class="tag get">GET</span> <code>/graph/nodes</code></td>
       <td>First 10 nodes of any label — a smoke test for "is there anything in here".</td>
-      <td><a class="ref" href="../../src/routers/graph.py">graph.py:36</a></td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:38</a></td>
     </tr>
     <tr>
       <td><span class="tag get">GET</span> <code>/graph/nodes/{id}</code></td>
       <td>One node by Neo4j element ID.</td>
-      <td><a class="ref" href="../../src/routers/graph.py">graph.py:98</a></td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:101</a></td>
     </tr>
     <tr>
       <td><span class="tag get">GET</span> <code>/graph/search?q=</code></td>
       <td>Substring sweep across every property of every node, capped at 20.</td>
-      <td><a class="ref" href="../../src/routers/graph.py">graph.py:167</a></td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:171</a></td>
     </tr>
     <tr>
       <td><span class="tag post">POST</span> <code>/graph/search</code></td>
       <td>Embed the query text and hit the vector index directly — retrieval without the LLM.</td>
-      <td><a class="ref" href="../../src/routers/graph.py">graph.py:259</a></td>
+      <td><a class="ref" href="../../src/routers/graph.py">graph.py:264</a></td>
     </tr>
     <tr>
       <td><span class="tag get">GET</span> <code>/files/{path}</code></td>
@@ -176,12 +176,12 @@
     <tr>
       <td><span class="tag get">GET</span> <code>/health</code></td>
       <td>Liveness. The Electron shell polls this to decide when the native API is ready.</td>
-      <td><a class="ref" href="../../src/main.py">main.py:97</a></td>
+      <td><a class="ref" href="../../src/main.py">main.py:108</a></td>
     </tr>
     <tr>
       <td><span class="tag get">GET</span> <code>/</code></td>
       <td>The chat UI. <code>StaticFiles</code> is mounted <em>last</em> so it cannot shadow API routes.</td>
-      <td><a class="ref" href="../../src/main.py">main.py:108</a></td>
+      <td><a class="ref" href="../../src/main.py">main.py:121</a></td>
     </tr>
   </tbody>
 </table>
@@ -191,7 +191,7 @@
   <strong>One text-search subtlety</strong>
   <p>
     <code>GET /graph/search</code> uses <code>toStringOrNull</code> rather than <code>toString</code>
-    (<a class="ref" href="../../src/routers/graph.py">graph.py:237</a>). Chunk nodes carry a 768-element
+    (<a class="ref" href="../../src/routers/graph.py">graph.py:242</a>). Chunk nodes carry a 768-element
     <code>embedding</code> array; <code>toString</code> on an array raises, whereas
     <code>toStringOrNull</code> yields null and the <code>CONTAINS</code> simply evaluates falsey. Without
     it, every search over a populated graph would error.
@@ -260,7 +260,7 @@
 <p>
   <a class="ref" href="../../src/core/rate_limit.py">rate_limit.py:14</a> creates a single
   <code>slowapi</code> limiter keyed on the client address. It is attached to the app and paired with
-  the library's 429 handler in <a class="ref" href="../../src/main.py">main.py:87</a>, then applied to
+  the library's 429 handler in <a class="ref" href="../../src/main.py">main.py:98</a>, then applied to
   both chat endpoints with <code>@limiter.limit(chat_rate_limit)</code>.
 </p>
 
@@ -314,10 +314,10 @@
   <text x="38" y="288" class="d-t sm">A high <tspan class="d-t sm mono">load=</tspan> on repeat queries means the model was evicted between calls — set OLLAMA_KEEP_ALIVE on the host. Growing <tspan class="d-t sm mono">prompt_eval</tspan> means the context is filling up.</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../src/core/timing.py">timing.py:50</a> parses Ollama's duration fields ·
-  <a class="ref" href="../../src/core/timing.py">timing.py:124</a> is the <code>timed()</code> context
+  <a class="ref" href="../../src/core/timing.py">timing.py:41</a> parses Ollama's duration fields ·
+  <a class="ref" href="../../src/core/timing.py">timing.py:115</a> is the <code>timed()</code> context
   manager · both no-op when <code>timing_log_enabled</code> is false. Streaming generation is timed from
-  the final <code>done</code> chunk (<a class="ref" href="../../src/services/llm.py">llm.py:100</a>).
+  the final <code>done</code> chunk (<a class="ref" href="../../src/services/llm.py">llm.py:122</a>).
 </figcaption>
 </figure>
 
@@ -388,7 +388,7 @@
   <a class="ref" href="../../src/models.py">models.py:10</a>, while the chat-specific
   <code>ChatRequest</code>, <code>Source</code>, <code>ChatResponse</code> and
   <code>HistoryResponse</code> are colocated with their router at
-  <a class="ref" href="../../src/routers/chat.py">chat.py:24</a>.
+  <a class="ref" href="../../src/routers/chat.py">chat.py:26</a>.
 </p>
 
 <p>

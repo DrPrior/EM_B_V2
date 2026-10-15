@@ -1,24 +1,28 @@
 {
-  "_comment": "USB delivery, no download server. The three custom assets (image/snapshot/projectData) are read from an `assets/` folder on the USB by filename; build-release.ps1 fills in their sha256. Docker + Ollama installers and the base models still come from the internet (targets are online). image.version MUST match the API image tag (emb-hybrid-api:<version>) and the APP_VERSION the desktop compose interpolates.",
-  "image": {
-    "version": "0.1.2",
-    "file": "emb-hybrid-api-0.1.2.tar.gz",
-    "sha256": "6ef4c9225a5dbe1dc6c2cc1ec80d7c9840048ba08cc2c7de2342f623e8585575"
+  "_comment": "USB delivery, no download server. Native custom assets (apiBundle/neo4j/jre/snapshot/projectData) are read from an `assets/` folder on the USB by filename; electron/scripts/build-release.ps1 fills in the sha256 (blank = verification skipped, for dev). The Ollama installer + base models still come from the internet. apiBundle is the folder-signature file. Build-pipeline contract: apiBundle unzips to <userData>/api/emb-api.exe + _internal/, neo4j to <userData>/neo4j/bin/..., jre to <userData>/jre/bin/. See docs/DECONTAINERIZE_PLAN.md (Workstream E).",
+  "version": "0.4.0",
+  "apiBundle": {
+    "file": "emb-api.zip",
+    "sha256": "080c492f7e9bd7f9587fb2e61d5f3db9a1d48e251bb7465d03e20c247b6feea7"
+  },
+  "neo4j": {
+    "file": "neo4j-community.zip",
+    "sha256": "af9b0f52d885310b05882497806a7df5bee99e4cbef5776b34ddace7f2f90376"
+  },
+  "jre": {
+    "file": "jre.zip",
+    "sha256": "d84cb732b45ec8a88b53e4b814eea0f2376f4001af38d88a6e4af5e25a955fb7"
   },
   "snapshot": {
     "file": "neo4j.dump",
-    "sha256": "020cefc970cd9e5a28f887a3987e1427a033ff6f787479f3559687ca967db305"
+    "sha256": "cb5ba3d473190f2bf94337afd80bb8abd82f9e40119702271bdd398e1b58c2a2"
   },
   "projectData": {
     "file": "project_data.tar.gz",
-    "sha256": "041947401ecddb6eebdf6ddfaeb20c0e2683730a1d1a3e23fb6fa0781e967419"
+    "sha256": "063134fc8df5c55fe718e55e3d2982b694350782be6231e604dccc9dc2725cbb"
   },
   "ollama": {
     "win32": "https://ollama.com/download/OllamaSetup.exe",
     "darwin": "https://ollama.com/download/Ollama.dmg"
-  },
-  "docker": {
-    "win32": "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe",
-    "darwin": "https://desktop.docker.com/mac/main/arm64/Docker.dmg"
   }
 }

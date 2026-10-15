@@ -67,5 +67,9 @@ usb-staging.zip
 #test outputs and logs
 test_output.txt
 
-#Neo4j data dubmp
-neo4j.dump
+# Neo4j database dumps, of any database. `neo4j-admin database dump` names the
+# file after the database, so a full backup also produces system.dump, and the
+# re-export keeps neo4j.dump.pre-migration. All are large and some carry the
+# system graph (users/roles), none belong in git.
+*.dump
+*.dump.pre-migration

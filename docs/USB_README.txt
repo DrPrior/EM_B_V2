@@ -1,10 +1,10 @@
 ================================================================================
  EM KNOWLEDGE ASSISTANT — Installation from this USB drive
- Version <version> (Windows)
+ Version 0.4.0 (Windows)
 ================================================================================
 
- (Maintainer: replace <version> with the shipped installer version before
- staging the drive.)
+ (Maintainer: keep this version in step with electron/package.json and the
+ installer file name below.)
 
 
 WHAT THIS IS
@@ -45,15 +45,15 @@ INSTALLING
 
 2. Double-click:
 
-       EM Knowledge Assistant-Setup-<version>.exe
+       EM Knowledge Assistant-Setup-0.4.0.exe
 
 3. Choose an install location (the default is fine) and let it install.
 
 4. Launch "EM Knowledge Assistant" from the Start menu. A setup window opens
    and walks through eight steps on its own:
 
-       Graphics check -> Ollama -> Language models -> Database engine ->
-       Application -> Source documents -> Knowledge graph -> Start
+       Detect hardware -> Ollama -> Language models -> Database engine ->
+       Application -> Source documents -> Knowledge graph -> Start assistant
 
    Just watch it. Each step shows its own progress. On a prepared computer the
    first three steps go by quickly — they find what they need already there and
@@ -75,7 +75,7 @@ them.
 
 WHAT'S ON THIS DRIVE
 --------------------
-  EM Knowledge Assistant-Setup-<version>.exe   The installer — start here.
+  EM Knowledge Assistant-Setup-0.4.0.exe   The installer — start here.
 
   assets\                                  Prepared data the setup reads (the
                                            application, the database engine, the
@@ -89,6 +89,10 @@ WHAT'S ON THIS DRIVE
                                            For maintainers, not needed to use
                                            the app.
 
+  TARGET_MACHINE_PREP.md                   How to prepare a computer before
+                                           handing over the drive. For IT /
+                                           whoever sets machines up.
+
   README.txt                               This file.
 
 
@@ -99,21 +103,23 @@ IF SOMETHING GOES WRONG
     policy block that Administrator rights do NOT bypass — contact whoever gave
     you the drive; it needs a signed build.
 
-"Setup can't find the assets folder"
+"Setup files not found"
     The USB drive was unplugged, or the folder was moved. Plug the drive back
-    in and click Retry. If it still can't find it, a folder picker appears —
-    select the "assets" folder on the USB drive.
+    in and try again. If it still can't find it, a window titled "Select the
+    setup folder from the USB drive" appears — choose the "assets" folder on
+    the USB drive. ("That folder doesn't contain the setup files" means a
+    different folder was picked.)
 
-"Checksum mismatch — the USB copy may be corrupt"
+"Checksum mismatch for <file> — the USB copy may be corrupt"
     A file on the drive is damaged. The drive needs to be re-made; contact
     whoever gave it to you.
 
-"Ollama is installed but is not running"
+"Ollama is installed but could not be started automatically"
     Open Ollama from the Start menu and give it a few seconds — its icon
     appears in the system tray (bottom-right, near the clock). Then click
     Retry.
 
-"Ollama needs to restart"
+"Ollama needs to restart to apply required settings"
     Find the Ollama icon in the system tray (bottom-right, near the clock),
     quit it, open Ollama again from the Start menu, then click Retry.
 

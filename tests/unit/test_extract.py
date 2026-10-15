@@ -1,5 +1,6 @@
 """Unit tests for LLM-based entity extraction (Ollama mocked)."""
 
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -97,3 +98,25 @@ def test_extract_material_type_defaults_to_other_when_blank() -> None:
 def test_extract_material_type_defaults_to_other_on_failure() -> None:
     with patch("pipeline.extract.generate_response", side_effect=RuntimeError()):
         assert extract_material_type("f.pdf", "x") == "Other"
+
+
+def test_extract_entities_failure_is_logged(caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="em_b")
+
+    with patch("pipeline.extract.generate_response", side_effect=RuntimeError("down")):
+        extract_entities("some text", session_id="sid-7")
+
+    (record,) = caplog.records
+    assert record.name == "em_b.extract"
+    assert "sid-7" in record.getMessage()
+    assert record.exc_info is not None
+
+
+def test_extract_material_type_failure_is_logged(caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="em_b")
+
+    with patch("pipeline.extract.generate_response", side_effect=RuntimeError("down")):
+        assert extract_material_type("doc.pdf", "excerpt") == "Other"
+
+    (record,) = caplog.records
+    assert "doc.pdf" in record.getMessage()

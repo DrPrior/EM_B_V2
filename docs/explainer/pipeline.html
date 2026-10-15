@@ -102,7 +102,7 @@
 <h2>Stage 1 — ingestion</h2>
 
 <p>
-  <a class="ref" href="../../pipeline/ingest.py">ingest.py:425</a> is the orchestrator. Everything
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:433</a> is the orchestrator. Everything
   above it in the file is a helper: file discovery, text extraction per format, chunking, and one
   small function per Cypher write.
 </p>
@@ -167,9 +167,9 @@
   <text x="380" y="626" class="d-m xs d-c">one Ollama /api/embeddings call and one write transaction per chunk</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../pipeline/ingest.py">ingest.py:210</a> <code>is_file_embedded</code> ·
-  <a class="ref" href="../../pipeline/ingest.py">ingest.py:270</a> <code>create_directory_hierarchy</code> ·
-  <a class="ref" href="../../pipeline/ingest.py">ingest.py:330</a> <code>clear_file_chunks</code> ·
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:216</a> <code>is_file_embedded</code> ·
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:276</a> <code>create_directory_hierarchy</code> ·
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:338</a> <code>clear_file_chunks</code> ·
   <a class="ref" href="../../src/services/embeddings.py">embeddings.py:41</a> <code>embed_and_store_chunk</code>
 </figcaption>
 </figure>
@@ -187,7 +187,7 @@
 <h3>Chunking</h3>
 
 <p>
-  <a class="ref" href="../../pipeline/ingest.py">ingest.py:149</a> splits on sentence endings, blank
+  <a class="ref" href="../../pipeline/ingest.py">ingest.py:155</a> splits on sentence endings, blank
   lines, and newlines preceding a capital letter or a bullet marker — the last rule is what keeps
   PowerPoint slides and bullet lists coherent. Segments are then packed greedily up to
   <code>chunk_max_tokens × 4</code> characters, and the tail of the finished chunk is prepended to the
@@ -222,7 +222,7 @@
 </svg>
 <figcaption>
   The overlap gives the retriever a second chance at facts that straddle a boundary. Token counts are
-  approximated at 4 characters per token (<a class="ref" href="../../pipeline/ingest.py">ingest.py:135</a>)
+  approximated at 4 characters per token (<a class="ref" href="../../pipeline/ingest.py">ingest.py:141</a>)
   — cheap and good enough for sizing.
 </figcaption>
 </figure>
@@ -232,7 +232,7 @@
 <p>
   The corpus ships with hand-maintained <code>MANIFEST*.md</code> files: markdown tables of filename,
   title, category, source URL, edition, "why it matters", and a validation column.
-  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:107</a> finds the one table
+  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:109</a> finds the one table
   whose header contains <code>filename</code>, <code>title</code> and <code>category</code> and ignores
   every other table and all prose in the file.
 </p>
@@ -280,7 +280,7 @@
   <text x="345" y="290" class="d-m xs d-c">ingest MERGEs on the same filepath, so chunks attach to this very node</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:239</a>. The synthetic root is
+  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:241</a>. The synthetic root is
   the configured ingestion root (<code>data_root</code> / <code>DATA_ROOT</code>), deliberately, so
   catalogue-only entries converge with real files rather than forking into duplicates.
 </figcaption>
@@ -288,22 +288,22 @@
 
 <p>
   A row's metadata write is a single transaction,
-  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:156</a>: MERGE the File, then
+  <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:158</a>: MERGE the File, then
   conditionally MERGE-and-link Category, Source (only if the cell starts with <code>http</code>),
   Edition (unless it is an em dash), WhyItMatters, Validated, an Access level inferred from whether the
   source cell mentions <em>login-gated</em>, and a Tranche derived from the manifest's own H1 heading
-  (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:92</a>).
+  (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:94</a>).
 </p>
 
 <div class="note warn">
   <strong>Two lists are maintained by hand</strong>
   <p>
-    <code>SUPERSEDES_EDGES</code> (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:43</a>)
-    and <code>VARIANT_GROUPS</code> (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:53</a>)
+    <code>SUPERSEDES_EDGES</code> (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:45</a>)
+    and <code>VARIANT_GROUPS</code> (<a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:55</a>)
     encode supersession and duplication facts that live in the manifest <em>prose</em>, not in any
     column — so they can't be parsed. When a document is superseded or a duplicate is spotted, edit
     these lists. They are applied after all rows load, by
-    <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:301</a>; an edge naming a
+    <a class="ref" href="../../pipeline/load_manifest.py">load_manifest.py:307</a>; an edge naming a
     filename with no File node is a silent no-op because the <code>MATCH</code> simply fails.
   </p>
 </div>
@@ -312,7 +312,7 @@
 
 <p>
   Two passes over the graph, each skipping work already done
-  (<a class="ref" href="../../pipeline/enrich.py">enrich.py:189</a>).
+  (<a class="ref" href="../../pipeline/enrich.py">enrich.py:204</a>).
 </p>
 
 <figure>
@@ -371,28 +371,28 @@
   <text x="34" y="376" class="d-t sm">Courses are attached to the parent <tspan class="d-t sm mono">File</tspan> instead, since a course reference describes the whole document.</text>
 </svg>
 <figcaption>
-  <a class="ref" href="../../pipeline/enrich.py">enrich.py:103</a> pass 1 ·
-  <a class="ref" href="../../pipeline/enrich.py">enrich.py:138</a> pass 2 ·
-  <a class="ref" href="../../pipeline/enrich.py">enrich.py:30</a> the per-chunk transaction.
+  <a class="ref" href="../../pipeline/enrich.py">enrich.py:106</a> pass 1 ·
+  <a class="ref" href="../../pipeline/enrich.py">enrich.py:141</a> pass 2 ·
+  <a class="ref" href="../../pipeline/enrich.py">enrich.py:33</a> the per-chunk transaction.
 </figcaption>
 </figure>
 
 <h3>pipeline/extract.py is shared, not a stage</h3>
 
 <p>
-  <a class="ref" href="../../pipeline/extract.py">extract.py:75</a> is a library used by two very
+  <a class="ref" href="../../pipeline/extract.py">extract.py:78</a> is a library used by two very
   different callers: <code>enrich.py</code> in batch, and <code>rag.py</code> once per user query. Both
   hit the same prompt and the same defensive parser.
 </p>
 
 <ul>
   <li>
-    The prompt (<a class="ref" href="../../pipeline/extract.py">extract.py:20</a>) demands raw JSON with
+    The prompt (<a class="ref" href="../../pipeline/extract.py">extract.py:23</a>) demands raw JSON with
     a fixed four-key schema, and calls are made with Ollama's <code>format: json</code> mode so the
     model stops as soon as the object closes instead of padding with prose.
   </li>
   <li>
-    <code>_parse_json</code> (<a class="ref" href="../../pipeline/extract.py">extract.py:63</a>) still
+    <code>_parse_json</code> (<a class="ref" href="../../pipeline/extract.py">extract.py:66</a>) still
     strips markdown fences and regex-extracts the first <code>{…}</code>, because models lie about
     output formats.
   </li>
@@ -433,7 +433,7 @@
   closes the driver in a <code>finally</code>, which is what makes the direct
   <code>python -m pipeline.*</code> form work (it loads <code>.env</code> for connection settings —
   <a class="ref" href="../../scripts/dev-up.ps1">scripts/dev-up.ps1</a> does this for the API). The admin
-  router (<a class="ref" href="../../src/routers/admin.py">admin.py:66</a>) wraps the same functions with
+  router (<a class="ref" href="../../src/routers/admin.py">admin.py:73</a>) wraps the same functions with
   the request-scoped session instead.
 </p>
 

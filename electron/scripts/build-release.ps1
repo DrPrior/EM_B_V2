@@ -48,13 +48,13 @@
     Python interpreter used to run PyInstaller. Must be the environment that has
     the app's runtime deps AND PyInstaller (on the maintainer box: the pyAI conda
     env). Defaults to the active conda env's python if one is activated, else
-    "python" — which on a machine with a system Python on PATH is usually the
+    "python" - which on a machine with a system Python on PATH is usually the
     wrong one. The script checks before freezing and says so.
 
 .PARAMETER CertSubject
     If given, code-sign emb-api.exe with this certificate subject via signtool
     BEFORE zipping (so the unpacked exe clears WDAC). If omitted, the bundle is
-    shipped UNSIGNED and the script warns — WDAC will block it on the fleet.
+    shipped UNSIGNED and the script warns - WDAC will block it on the fleet.
 
 .EXAMPLE
     pwsh -File electron/scripts/build-release.ps1 -Neo4jHome C:\stage\neo4j -JreHome C:\stage\jre `
@@ -93,7 +93,7 @@ function Compress-Contents([string]$SourceDir, [string]$Dest) {
     Compress-Archive -Path (Join-Path $SourceDir '*') -DestinationPath $Dest -Force
 }
 
-# ── 0. Preflight: is $Python the app's environment? ─────────────────────────
+# -- 0. Preflight: is $Python the app's environment? -------------------------
 # Two failure modes, one silent. A Python without PyInstaller fails loudly but
 # unhelpfully. A Python WITH PyInstaller but without the app's deps is worse:
 # PyInstaller only warns about unresolvable imports, so the freeze "succeeds"
@@ -118,7 +118,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "    PyInstaller $pyiVersion; app imports OK" -ForegroundColor DarkGray
 
-# ── 1. Freeze the API (PyInstaller one-dir) ─────────────────────────────────
+# -- 1. Freeze the API (PyInstaller one-dir) ---------------------------------
 Write-Host "==> [1/5] Freezing the API (pyinstaller emb-api.spec) ..." -ForegroundColor Cyan
 & $Python -m PyInstaller (Join-Path $repoRoot "emb-api.spec") --noconfirm --log-level WARN
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
@@ -143,7 +143,7 @@ $apiOut = Join-Path $OutDir "emb-api.zip"
 Write-Host "==> Zipping API bundle -> emb-api.zip ..." -ForegroundColor Cyan
 Compress-Contents $apiDist $apiOut
 
-# ── 2. Neo4j Community + JRE ────────────────────────────────────────────────
+# -- 2. Neo4j Community + JRE ------------------------------------------------
 Write-Host "==> [2/5] Zipping Neo4j Community -> neo4j-community.zip ..." -ForegroundColor Cyan
 if (-not (Test-Path (Join-Path $Neo4jHome "bin"))) { throw "$Neo4jHome does not look like a Neo4j home (no bin/)." }
 
@@ -155,12 +155,12 @@ if (-not (Test-Path (Join-Path $Neo4jHome "bin"))) { throw "$Neo4jHome does not 
 # anyway. scripts/stage-neo4j.ps1 leaves the home clean; this is the backstop.
 $authIni = Join-Path $Neo4jHome "data\dbms\auth.ini"
 if (Test-Path $authIni) {
-    throw ("$Neo4jHome carries data\dbms\auth.ini — that credential would ship to every user. " +
+    throw ("$Neo4jHome carries data\dbms\auth.ini - that credential would ship to every user. " +
            "Delete data\ and re-stage (scripts/stage-neo4j.ps1).")
 }
 $stagedStore = Join-Path $Neo4jHome "data\databases\neo4j"
 if ((Test-Path $stagedStore) -and @(Get-ChildItem $stagedStore -Force -ErrorAction SilentlyContinue).Count -gt 0) {
-    throw ("$Neo4jHome carries a populated data\databases\neo4j — the graph already ships as " +
+    throw ("$Neo4jHome carries a populated data\databases\neo4j - the graph already ships as " +
            "neo4j.dump, and first run overwrites this copy. Delete data\ and re-stage.")
 }
 
@@ -172,13 +172,13 @@ if (-not (Test-Path (Join-Path $JreHome "bin"))) { throw "$JreHome does not look
 $jreOut = Join-Path $OutDir "jre.zip"
 Compress-Contents $JreHome $jreOut
 
-# ── 3. Graph dump (must be record/aligned, not block) ───────────────────────
+# -- 3. Graph dump (must be record/aligned, not block) -----------------------
 Write-Host "==> [4/5] Staging graph dump -> neo4j.dump ..." -ForegroundColor Cyan
 if (-not (Test-Path $DumpPath)) { throw "Dump not found: $DumpPath. Produce it via the block->aligned migration first." }
 $dumpOut = Join-Path $OutDir "neo4j.dump"
 if ($DumpPath -ne $dumpOut) { Copy-Item $DumpPath $dumpOut -Force }
 
-# ── 4. Source corpus ────────────────────────────────────────────────────────
+# -- 4. Source corpus --------------------------------------------------------
 Write-Host "==> [5/5] Archiving project_data -> project_data.tar.gz ..." -ForegroundColor Cyan
 $dataOut = Join-Path $OutDir "project_data.tar.gz"
 tar -czf $dataOut -C $repoRoot project_data
@@ -187,7 +187,7 @@ if ($LASTEXITCODE -ne 0) { throw "tar of project_data failed." }
 # Drop any stale Docker image tar from a previous (containerized) build.
 Get-ChildItem $OutDir -Filter "emb-hybrid-api-*.tar.gz" -ErrorAction SilentlyContinue | Remove-Item -Force
 
-# ── 5. Update the manifest ──────────────────────────────────────────────────
+# -- 5. Update the manifest --------------------------------------------------
 Write-Host "==> Updating manifest (filenames + checksums) ..." -ForegroundColor Cyan
 $manifest.version           = $Version
 $manifest.apiBundle.file    = "emb-api.zip"

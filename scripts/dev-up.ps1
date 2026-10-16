@@ -63,7 +63,7 @@ foreach ($line in Get-Content $envFile) {
 
 foreach ($required in @('NEO4J_AUTH', 'DB_URI')) {
     if (-not $loaded.ContainsKey($required)) {
-        Write-Error "$required is not set in .env — the API cannot reach Neo4j without it."
+        Write-Error "$required is not set in .env - the API cannot reach Neo4j without it."
     }
 }
 Write-Host "Loaded $($loaded.Count) vars from .env" -ForegroundColor Green

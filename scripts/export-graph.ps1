@@ -8,7 +8,7 @@
     Native (decontainerized) port of the former docker-compose version: drives
     the host's `neo4j-admin database dump` directly. Neo4j must be OFFLINE for the
     dump, and this script does NOT manage the server lifecycle (Neo4j Desktop or a
-    bundled server owns it) — stop the database yourself first. The script refuses
+    bundled server owns it) - stop the database yourself first. The script refuses
     to run while bolt (127.0.0.1:7687) is still open.
 
     Version note: a dump loads into the SAME Neo4j major line it was taken from,
@@ -21,7 +21,7 @@
 
 .PARAMETER JavaHome
     JAVA_HOME for neo4j-admin. Neo4j Desktop bundles a JRE under
-    <...>/Cache/runtime/<zulu...> — pass it here if `java` isn't already on PATH.
+    <...>/Cache/runtime/<zulu...> - pass it here if `java` isn't already on PATH.
 
 .PARAMETER Database
     Database to dump. Defaults to "neo4j" (the app's only database).
@@ -45,7 +45,7 @@ New-Item -ItemType Directory -Force -Path $snapshotDir | Out-Null
 
 # Guard: the dump requires the database offline.
 $boltUp = (Test-NetConnection 127.0.0.1 -Port 7687 -WarningAction SilentlyContinue).TcpTestSucceeded
-if ($boltUp) { throw "Neo4j is running (bolt 127.0.0.1:7687 is open). Stop the database first — an offline dump is required." }
+if ($boltUp) { throw "Neo4j is running (bolt 127.0.0.1:7687 is open). Stop the database first - an offline dump is required." }
 if (-not (Test-Path $Neo4jAdmin)) { throw "neo4j-admin not found at $Neo4jAdmin." }
 if ($JavaHome) { $env:JAVA_HOME = $JavaHome }
 
@@ -58,4 +58,4 @@ if (-not (Test-Path $dump)) { throw "Expected dump not found at $dump." }
 $sizeMB = [math]::Round((Get-Item $dump).Length / 1MB, 1)
 Write-Host ""
 Write-Host "Done. Wrote $dump ($sizeMB MB)." -ForegroundColor Green
-Write-Host "It is gitignored — share via Git LFS or out-of-band. Restore with scripts/import-graph.ps1. Start Neo4j again when finished." -ForegroundColor Green
+Write-Host "It is gitignored - share via Git LFS or out-of-band. Restore with scripts/import-graph.ps1. Start Neo4j again when finished." -ForegroundColor Green

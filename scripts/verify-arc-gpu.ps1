@@ -12,7 +12,7 @@
     single question: did Ollama load the model into GPU VRAM, or is it running on
     the CPU?
 
-    There is nothing to emulate — Ollama needs a real Vulkan-capable GPU. Run
+    There is nothing to emulate - Ollama needs a real Vulkan-capable GPU. Run
     this ON the machine with the Arc GPU. The script:
 
       1. Confirms the Ollama daemon is reachable.
@@ -22,14 +22,14 @@
       4. Reads /api/ps (size vs size_vram) and prints an exact GPU/CPU verdict.
 
     A '100% GPU' verdict on the Arc machine is the goal. '100% CPU' means Vulkan
-    was not detected — check the log lines in step 2, confirm the Ollama version
+    was not detected - check the log lines in step 2, confirm the Ollama version
     supports your Arc, and consider Intel's ipex-llm portable Ollama build. A
     partial split usually means the model does not fit in Arc VRAM (this stack
     keeps two models resident via OLLAMA_MAX_LOADED_MODELS=2).
 
 .PARAMETER Model
     The model to verify. Defaults to "chat-model" (the app's chat variant). Must
-    be a generation-capable model — do NOT pass "embedding-model" here, it has no
+    be a generation-capable model - do NOT pass "embedding-model" here, it has no
     /api/generate endpoint.
 
 .PARAMETER OllamaHost
@@ -86,7 +86,7 @@ if (Test-Path $LogPath) {
     }
 }
 else {
-    Write-Host "    Log not found at $LogPath — skipping (pass -LogPath to point at it)." -ForegroundColor Yellow
+    Write-Host "    Log not found at $LogPath - skipping (pass -LogPath to point at it)." -ForegroundColor Yellow
 }
 
 # --- 3. Warm the model and measure throughput ------------------------------
@@ -129,15 +129,15 @@ Write-Host "    Model : $($entry.name)" -ForegroundColor Green
 Write-Host ("    VRAM  : {0:N0} MB of {1:N0} MB total" -f ($vram / 1MB), ($total / 1MB)) -ForegroundColor Green
 
 if ($gpuPct -ge 99) {
-    Write-Host "    VERDICT: 100% GPU — fully offloaded to the GPU. Arc acceleration confirmed." -ForegroundColor Green
+    Write-Host "    VERDICT: 100% GPU - fully offloaded to the GPU. Arc acceleration confirmed." -ForegroundColor Green
 }
 elseif ($gpuPct -le 1) {
-    Write-Host "    VERDICT: 100% CPU — NOT accelerated. Vulkan/Arc was not used." -ForegroundColor Red
+    Write-Host "    VERDICT: 100% CPU - NOT accelerated. Vulkan/Arc was not used." -ForegroundColor Red
     Write-Host "             Check the backend log lines above, confirm your Ollama version" -ForegroundColor Red
     Write-Host "             supports this Arc GPU, or try Intel's ipex-llm Ollama build." -ForegroundColor Red
 }
 else {
-    Write-Host "    VERDICT: $gpuPct% GPU / $(100 - $gpuPct)% CPU — partial offload." -ForegroundColor Yellow
+    Write-Host "    VERDICT: $gpuPct% GPU / $(100 - $gpuPct)% CPU - partial offload." -ForegroundColor Yellow
     Write-Host "             The model likely does not fit in Arc VRAM alongside the other" -ForegroundColor Yellow
     Write-Host "             resident model. Use a smaller quant or lower OLLAMA_MAX_LOADED_MODELS." -ForegroundColor Yellow
 }

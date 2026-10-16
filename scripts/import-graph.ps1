@@ -8,12 +8,12 @@
 .DESCRIPTION
     Native (decontainerized) counterpart to export-graph.ps1: drives the host's
     `neo4j-admin database load` directly. Neo4j must be OFFLINE for the load, and
-    this script does NOT manage the server lifecycle — stop the database yourself
+    this script does NOT manage the server lifecycle - stop the database yourself
     first (it refuses to run while bolt 127.0.0.1:7687 is open). `--overwrite-
     destination=true` REPLACES the local database, so any existing local graph is
     discarded. Start Neo4j again afterward; the vector index rebuilds on startup.
 
-    You still need host-native Ollama to *query* the app — the snapshot only skips
+    You still need host-native Ollama to *query* the app - the snapshot only skips
     the rebuild. The dump must match the Neo4j major line and, for Community, be a
     record format (aligned/standard), not `block`.
 
@@ -49,7 +49,7 @@ $sizeMB = [math]::Round((Get-Item $dump).Length / 1MB, 1)
 Write-Host "==> Found $dump ($sizeMB MB)." -ForegroundColor Cyan
 
 $boltUp = (Test-NetConnection 127.0.0.1 -Port 7687 -WarningAction SilentlyContinue).TcpTestSucceeded
-if ($boltUp) { throw "Neo4j is running (bolt 127.0.0.1:7687 is open). Stop the database first — an offline load is required." }
+if ($boltUp) { throw "Neo4j is running (bolt 127.0.0.1:7687 is open). Stop the database first - an offline load is required." }
 if (-not (Test-Path $Neo4jAdmin)) { throw "neo4j-admin not found at $Neo4jAdmin." }
 if ($JavaHome) { $env:JAVA_HOME = $JavaHome }
 

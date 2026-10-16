@@ -10,7 +10,7 @@
     and updates the manifest) and AFTER `npm run dist:win` in electron/ (which
     bakes that manifest into the installer).
 
-    The script is the last mile — it does not build anything. It:
+    The script is the last mile - it does not build anything. It:
 
       1. Verifies the installer's *bundled* manifest matches the manifest in the
          repo (catches "assets rebuilt but installer not rebuilt").
@@ -23,7 +23,7 @@
          bad copy is caught here rather than on the user's machine.
       4. Copies the whole layout to -Destination with robocopy.
       5. Re-verifies the checksums at the destination when -Verify is given
-         (worth it for a real USB stick — flash media fails quietly).
+         (worth it for a real USB stick - flash media fails quietly).
 
     Resulting layout:
 
@@ -156,7 +156,7 @@ function Get-ManifestMismatchMessage([string]$RepoPath, [string]$BundledPath, [s
     return ($lines -join "`n")
 }
 
-# ── 1. Locate the pieces ────────────────────────────────────────────────────
+# -- 1. Locate the pieces ----------------------------------------------------
 if (-not (Test-Path $manifestPath)) { throw "Missing $manifestPath." }
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 
@@ -168,7 +168,7 @@ if (-not $installer) {
 
 Write-Host "==> Installer: $($installer.Name)  ($([math]::Round($installer.Length/1MB,1)) MB, built $($installer.LastWriteTime))" -ForegroundColor Cyan
 
-# ── 2. The installer must carry the current manifest ────────────────────────
+# -- 2. The installer must carry the current manifest ------------------------
 # electron-builder copies resources/assets.manifest.json into the app at build
 # time. If the assets were rebuilt after the installer, the baked-in checksums
 # are stale and first-run setup fails with "Checksum mismatch" on the user's
@@ -184,7 +184,7 @@ if (Test-Path $bundledPath) {
     Write-Warning "Could not find $bundledPath - skipping the manifest-freshness check."
 }
 
-# ── 3. Report the installer's signature ─────────────────────────────────────
+# -- 3. Report the installer's signature -------------------------------------
 # Unsigned is a warning, not an error: the build ships unsigned until a
 # certificate exists. But an unsigned installer is refused outright by
 # AppLocker/WDAC/SmartScreen-for-Business on managed machines - and elevation
@@ -208,7 +208,7 @@ if ($sig.Status -eq "Valid") {
                    "win.signtoolOptions.certificateSubjectName) and rebuild before wide distribution.")
 }
 
-# ── 4. Verify the source assets ─────────────────────────────────────────────
+# -- 4. Verify the source assets ---------------------------------------------
 $assetKeys = @("apiBundle", "neo4j", "jre", "snapshot", "projectData")
 Write-Host "==> Verifying source assets in release\ ..." -ForegroundColor Cyan
 foreach ($key in $assetKeys) {
@@ -224,7 +224,7 @@ foreach ($key in $assetKeys) {
     Write-Host ("    OK  {0,-32} {1,8:N1} MB" -f $entry.file, ((Get-Item $file).Length/1MB)) -ForegroundColor DarkGray
 }
 
-# ── 5. Copy the layout ──────────────────────────────────────────────────────
+# -- 5. Copy the layout ------------------------------------------------------
 Write-Host "==> Staging to $Destination ..." -ForegroundColor Cyan
 # A drive root (e.g. D:\ / E:\) already exists and cannot be created with
 # New-Item ("path is not of a legal form" on Windows PowerShell), so only create
@@ -237,7 +237,7 @@ Copy-Item $installer.FullName (Join-Path $Destination $installer.Name) -Force
 Copy-Item $readmeSrc (Join-Path $Destination "README.txt") -Force
 
 # The provisioning procedure travels with the drive: whoever preps the target
-# machines (install Ollama, set OLLAMA_*, pull the base models — Neo4j and the
+# machines (install Ollama, set OLLAMA_*, pull the base models - Neo4j and the
 # API now ship as bundled assets) needs it before the end user runs the installer.
 if (Test-Path $prepSrc) {
     Copy-Item $prepSrc (Join-Path $Destination "TARGET_MACHINE_PREP.md") -Force
@@ -263,7 +263,7 @@ if (-not $SkipExplainer) {
     }
 }
 
-# ── 6. Verify what actually landed ──────────────────────────────────────────
+# -- 6. Verify what actually landed ------------------------------------------
 if ($Verify) {
     Write-Host "==> Verifying the copied assets (re-hashing ~1 GB) ..." -ForegroundColor Cyan
     foreach ($key in $assetKeys) {
@@ -279,7 +279,7 @@ if ($Verify) {
     Write-Host "    (Skipped destination verification. Re-run with -Verify when writing to a real USB drive.)" -ForegroundColor DarkGray
 }
 
-# ── 6. Summary ──────────────────────────────────────────────────────────────
+# -- 6. Summary --------------------------------------------------------------
 $total = (Get-ChildItem $Destination -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ""
 Write-Host "Done. $Destination" -ForegroundColor Green

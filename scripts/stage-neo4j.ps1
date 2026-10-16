@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     build-release.ps1 zips the CONTENTS of a Neo4j home and a JRE home, but
-    nothing produced those homes — they were hand-configured, which is neither
+    nothing produced those homes - they were hand-configured, which is neither
     reproducible nor reviewable. This script closes that gap: unpack, apply the
     app's required settings, and (optionally) set the password and load the
     shipped graph dump, then report what it produced.
@@ -14,12 +14,12 @@
     Everything is idempotent; re-running re-applies the settings in place.
 
     What it configures, and why:
-      * loopback binds — the app is local-only; nothing listens on the LAN.
-      * modest heap/pagecache — Neo4j coexists with Ollama holding models in
+      * loopback binds - the app is local-only; nothing listens on the LAN.
+      * modest heap/pagecache - Neo4j coexists with Ollama holding models in
         VRAM/RAM on a laptop, so it must not assume the machine to itself. The
         graph store is ~140 MB, so a 512 MB page cache holds all of it.
-      * https off — there is no certificate and no remote client.
-      * usage reporting and Browser telemetry off — Neo4j defaults both on, and
+      * https off - there is no certificate and no remote client.
+      * usage reporting and Browser telemetry off - Neo4j defaults both on, and
         the app promises that nothing leaves the machine.
 
     The data directory is left at its default (<neo4j-home>/data), which is what
@@ -40,12 +40,12 @@
     An already-unpacked JRE home instead of -JreZip.
 
 .PARAMETER StageDir
-    Where the staged homes are written. Default C:\stage — giving
+    Where the staged homes are written. Default C:\stage - giving
     <StageDir>\neo4j and <StageDir>\jre.
 
     There is deliberately no -Password switch. `dbms set-initial-password` ignores
     --additional-config and writes data\dbms\auth.ini into the Neo4j home itself,
-    which build-release.ps1 would then zip — shipping a known credential to every
+    which build-release.ps1 would then zip - shipping a known credential to every
     user. The password belongs on the END USER's machine, where lib/firstrun.js
     generates a random one and sets it before the first start. To smoke-test
     locally, copy the staged home first; the script prints how.
@@ -53,7 +53,7 @@
 .PARAMETER Dump
     A neo4j.dump to load (its DIRECTORY is passed to --from-path). After loading,
     the store is migrated to this server's current format version and the
-    resulting format is printed — which is the check that it stayed in the
+    resulting format is printed - which is the check that it stayed in the
     Community-loadable `aligned` family.
 
 .PARAMETER ReExport
@@ -67,7 +67,7 @@
 
     The previous dump is preserved as neo4j.dump.pre-migration (never
     overwritten on a re-run), and the re-exported dump is then verified by
-    loading it into a throwaway data directory and reading its store format —
+    loading it into a throwaway data directory and reading its store format -
     so what gets checked is the artifact that ships, not the store it came from.
 
 .PARAMETER HeapSize
@@ -107,7 +107,7 @@ $ErrorActionPreference = "Stop"
 if (-not $Zip -and -not $Neo4jHome) { throw "Pass -Zip (a downloaded Neo4j Community zip) or -Neo4jHome." }
 if (-not $JreZip -and -not $JreHome) { throw "Pass -JreZip (a downloaded JRE zip) or -JreHome." }
 
-# ── helpers ─────────────────────────────────────────────────────────────────
+# -- helpers -----------------------------------------------------------------
 
 # Neo4j and JRE zips both wrap everything in one top-level folder. The app's
 # layout contract has no such level (<userData>/neo4j/bin/...), so unwrap it.
@@ -220,7 +220,7 @@ function Get-DumpStoreFormat([string]$AdminPath, [string]$JavaHome, [string]$Dum
                                 --additional-config and always writes into
                                 <NEO4J_HOME>\data, so one stray invocation bakes
                                 a known password into the bundle.
-      data\databases\neo4j\     the whole graph (~140 MB) — on top of the
+      data\databases\neo4j\     the whole graph (~140 MB) - on top of the
                                 neo4j.dump we already ship, which snapshot.js
                                 loads over it with --overwrite-destination=true.
                                 Pure waste.
@@ -251,7 +251,7 @@ function Assert-ShipClean([string]$HomeDir) {
     }
 }
 
-# ── 1. Stage the two homes ──────────────────────────────────────────────────
+# -- 1. Stage the two homes --------------------------------------------------
 
 if ($Zip)    { $Neo4jHome = Expand-Flattened $Zip    (Join-Path $StageDir "neo4j") "Neo4j Community" }
 if ($JreZip) { $JreHome   = Expand-Flattened $JreZip (Join-Path $StageDir "jre")   "JRE" }
@@ -272,7 +272,7 @@ if (Test-Path (Join-Path $JreHome "bin\javac.exe")) {
     Write-Warning "$JreHome is a JDK, not a JRE. It works, but ships a compiler you don't need."
 }
 
-# Neo4j 2026.x is built and tested on Java 17/21 — Neo4j Desktop bundles only
+# Neo4j 2026.x is built and tested on Java 17/21 - Neo4j Desktop bundles only
 # those, and the dev server runs 21. A JVM outside that range may refuse to run
 # the server, and finding that out on a user's machine is the expensive way.
 $javaMajor = 0
@@ -281,7 +281,7 @@ if ($verText -match 'version "(\d+)') { $javaMajor = [int]$Matches[1] }
 if ($javaMajor -eq 0) {
     Write-Warning "Could not read a Java version from $java."
 } elseif ($javaMajor -lt 17) {
-    throw "$JreHome is Java $javaMajor. Neo4j 2026.x needs 17 or 21 — use Temurin/Zulu JRE 21."
+    throw "$JreHome is Java $javaMajor. Neo4j 2026.x needs 17 or 21 - use Temurin/Zulu JRE 21."
 } elseif ($javaMajor -gt 21) {
     Write-Warning ("$JreHome is Java $javaMajor. Neo4j 2026.x ships and tests on 17/21 (this machine's " +
                    "Neo4j runs 21). If the server or neo4j-admin misbehaves, drop to JRE 21 first.")
@@ -292,7 +292,7 @@ if ($javaMajor -eq 0) {
 Write-Host "Neo4j home: $Neo4jHome" -ForegroundColor Green
 Write-Host "JRE home:   $JreHome"   -ForegroundColor Green
 
-# ── 2. Apply the app's settings ─────────────────────────────────────────────
+# -- 2. Apply the app's settings ---------------------------------------------
 
 Write-Host "==> Configuring conf\neo4j.conf ..." -ForegroundColor Cyan
 $settings = [ordered]@{
@@ -315,10 +315,10 @@ foreach ($k in $settings.Keys) {
     Write-Host ("    {0,-34} {1}" -f $k, $settings[$k]) -ForegroundColor DarkGray
 }
 
-# ── 3. Migrate + re-export the dump, in a SCRATCH data directory ────────────
+# -- 3. Migrate + re-export the dump, in a SCRATCH data directory ------------
 #
 # Everything below redirects server.directories.* into a temp dir. The Neo4j
-# home staged above must reach build-release.ps1 with an EMPTY data/ — see
+# home staged above must reach build-release.ps1 with an EMPTY data/ - see
 # Assert-ShipClean for what would otherwise end up in neo4j-community.zip.
 
 if ($Dump) {
@@ -355,7 +355,7 @@ if ($Dump) {
         Write-Host "==> Resulting store format:" -ForegroundColor Cyan
         Invoke-Admin $admin $JreHome @("database", "info", "--from-path=$scratch\data\databases", "neo4j")
 
-        # ── 3b. Re-export, so the artifact that SHIPS is already migrated ───
+        # -- 3b. Re-export, so the artifact that SHIPS is already migrated ---
         if ($ReExport) {
             # snapshot.js loads the dump and starts the server; its migrate call
             # is a non-fatal backstop, not something to rely on. So the shipped
@@ -378,7 +378,7 @@ if ($Dump) {
             $format = Get-DumpStoreFormat $admin $JreHome $dumpDir
             Write-Host "    Store format version: $format" -ForegroundColor Green
             if ($format -match 'block') {
-                throw "The re-exported dump is '$format' — Enterprise-only. The bundled Community server cannot load it."
+                throw "The re-exported dump is '$format' - Enterprise-only. The bundled Community server cannot load it."
             }
             if ($format -notmatch 'aligned|standard') {
                 Write-Warning "Unrecognized store format '$format'. Confirm Community can load it before shipping."
@@ -389,11 +389,11 @@ if ($Dump) {
     }
 }
 
-# ── 4. The staged home must ship empty ──────────────────────────────────────
+# -- 4. The staged home must ship empty --------------------------------------
 
 Assert-ShipClean $Neo4jHome
 
-# ── 5. What to do next ──────────────────────────────────────────────────────
+# -- 5. What to do next ------------------------------------------------------
 
 Write-Host ""
 Write-Host "Staged. Next:" -ForegroundColor Green
@@ -401,10 +401,10 @@ Write-Host "  1. Build the release assets:"
 Write-Host "       pwsh -File electron/scripts/build-release.ps1 -Neo4jHome '$Neo4jHome' -JreHome '$JreHome'"
 Write-Host "  2. Rebuild the installer, then stage the USB (see docs/DECONTAINERIZE_PLAN.md)."
 Write-Host ""
-Write-Host "To smoke-test the server by hand, do it on a COPY — starting it writes a" -ForegroundColor DarkGray
+Write-Host "To smoke-test the server by hand, do it on a COPY - starting it writes a" -ForegroundColor DarkGray
 Write-Host "store and an auth.ini into data\, which must not reach the shipped zip:" -ForegroundColor DarkGray
 Write-Host "    Copy-Item '$Neo4jHome' C:\stage\neo4j-smoketest -Recurse" -ForegroundColor DarkGray
 Write-Host "    `$env:JAVA_HOME='$JreHome'" -ForegroundColor DarkGray
 Write-Host "    C:\stage\neo4j-smoketest\bin\neo4j-admin.bat dbms set-initial-password <pw>" -ForegroundColor DarkGray
-Write-Host "    C:\stage\neo4j-smoketest\bin\neo4j-admin.bat database load neo4j --from-path='$($dumpDir ?? "<dump dir>")'" -ForegroundColor DarkGray
+Write-Host "    C:\stage\neo4j-smoketest\bin\neo4j-admin.bat database load neo4j --from-path='$(if ($null -ne $dumpDir) { $dumpDir } else { "<dump dir>" })'" -ForegroundColor DarkGray
 Write-Host "    C:\stage\neo4j-smoketest\bin\neo4j.bat console" -ForegroundColor DarkGray

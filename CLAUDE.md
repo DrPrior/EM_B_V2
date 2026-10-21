@@ -114,6 +114,19 @@ the ingested File nodes. Run it earlier and manifest rows whose category column
 doesn't match an on-disk folder (most of MANIFEST2.md) create duplicate catalog
 nodes at synthetic paths.
 
+**Re-embed without rebuilding** (after an embedding-model change, or a graph
+loaded from an old dump):
+```powershell
+python -m pipeline.reembed --dry-run   # count chunks the vector index can't use
+python -m pipeline.reembed             # recompute them from c.text; resumable
+```
+The vector index only sees embeddings of exactly `schema.EMBEDDING_DIMENSIONS`
+(768). Neo4j silently skips any other size, so retrieval finds nothing and every
+answer says there is "not enough context". API startup logs an ERROR naming the
+count when this is the case. The pre-September graph (e.g. the installed app's
+July `snapshot/neo4j.dump`) is 2560-d qwen3-embedding. About 16 min for ~9k
+chunks on the Arc 140V.
+
 **Tests** (in your env — no `docker exec` anymore):
 ```powershell
 pytest                            # unit only; integration excluded by pyproject addopts
@@ -356,7 +369,7 @@ reads them from `os.environ` directly.
 | `entity_extraction_max_tokens` | 256 | `num_predict` cap for the per-query entity-extraction call |
 | `enrichment_concurrency` | 4 | Parallel LLM calls in enrich.py Pass 2 (~2.3× on an RTX 4000 Ada) |
 | `data_root` | `/app/project_data` | Ingestion root **and** the base for `/files` citation links |
-| `ollama_base_url` | `http://localhost:11434` | Host-native Ollama |
+| `ollama_base_url` | `http://127.0.0.1:11434` | Host-native Ollama. Not `localhost`: on Windows it tries IPv6 `::1` first and every call waits ~2 s for the IPv4 fallback |
 | `ollama_startup_retries` / `_delay` / `_request_timeout` / `_pull_timeout` | 5 / 3.0s / 10s / 1800s | Bootstrap retry + timeout budget (pull covers a ~10 GB cold download) |
 | `log_dir` | `None` | `LOG_DIR` — set (or running frozen) ⇒ rotating `api.log` files only; unset ⇒ console only. See Logging below |
 | `log_level` | `INFO` | Level for all `em_b.*` loggers. `DEBUG` also logs user question text |

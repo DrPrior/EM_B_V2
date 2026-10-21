@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.main import app, lifespan
+from src.main import _check_embedding_dimensions, app, lifespan
 
 pytestmark = pytest.mark.unit
 
@@ -68,3 +68,43 @@ def _raise(exc: Exception) -> None:
 async def _enter_lifespan() -> None:
     async with lifespan(app):
         pass
+
+
+def test_embedding_check_logs_info_when_all_chunks_fit(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="em_b")
+
+    with patch("src.main.chunk_embedding_sizes", return_value={768: 10}):
+        _check_embedding_dimensions(object())
+
+    (record,) = caplog.records
+    assert record.levelno == logging.INFO
+    assert "10 chunks, all 768-d" in record.getMessage()
+
+
+def test_embedding_check_logs_error_on_mismatch(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="em_b")
+
+    with patch(
+        "src.main.chunk_embedding_sizes",
+        return_value={2560: 9230, None: 2, 768: 8},
+    ):
+        _check_embedding_dimensions(object())
+
+    (record,) = caplog.records
+    assert record.levelno == logging.ERROR
+    message = record.getMessage()
+    assert "9232 of 9240 chunks" in message
+    assert "9230 at 2560-d" in message
+    assert "2 with none" in message
+    assert "python -m pipeline.reembed" in message
+
+
+def test_embedding_check_failure_never_blocks_startup(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="em_b")
+
+    with patch("src.main.chunk_embedding_sizes", side_effect=RuntimeError("down")):
+        _check_embedding_dimensions(object())  # must not raise
+
+    (record,) = caplog.records
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is not None

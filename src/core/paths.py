@@ -50,3 +50,12 @@ def default_log_dir() -> Path | None:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent / "logs"
     return None
+
+
+def dev_error_log_dir() -> Path:
+    """Directory for the dev-mode ``errors.log``: ``logs/`` at the repo root.
+
+    Only used from source in console mode. It is gitignored, and lives in the
+    checkout so a worktree's errors stay with that worktree.
+    """
+    return resource_root() / "logs"

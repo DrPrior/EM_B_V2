@@ -3,6 +3,7 @@ from neo4j import ManagedTransaction, Session  # type: ignore[import-untyped]
 
 from src.core.config import settings
 from src.core.timing import log_ollama, parse_ollama_timings
+from src.services.llm import raise_for_ollama
 
 
 def generate_embedding(text: str, session_id: str | None = None) -> list[float]:
@@ -11,7 +12,7 @@ def generate_embedding(text: str, session_id: str | None = None) -> list[float]:
     payload = {"model": settings.embedding_model, "prompt": text}
 
     response = requests.post(url, json=payload)
-    response.raise_for_status()  # Raise an error if the request fails
+    raise_for_ollama(response)
 
     body = response.json()
     log_ollama(

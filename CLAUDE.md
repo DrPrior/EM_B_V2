@@ -360,7 +360,8 @@ reads them from `os.environ` directly.
 | `ollama_startup_retries` / `_delay` / `_request_timeout` / `_pull_timeout` | 5 / 3.0s / 10s / 1800s | Bootstrap retry + timeout budget (pull covers a ~10 GB cold download) |
 | `log_dir` | `None` | `LOG_DIR` — set (or running frozen) ⇒ rotating `api.log` files only; unset ⇒ console only. See Logging below |
 | `log_level` | `INFO` | Level for all `em_b.*` loggers. `DEBUG` also logs user question text |
-| `log_max_bytes` / `log_backup_count` | 10 MB / 5 | `api.log` rotation size and backups kept |
+| `log_max_bytes` / `log_backup_count` | 10 MB / 5 | `api.log` (and `errors.log`) rotation size and backups kept |
+| `dev_error_log` | `True` | `DEV_ERROR_LOG` — in console mode, also copy WARNING+ to `logs/errors.log` at the repo root |
 | `timing_log_enabled` | `True` | Master switch for per-stage query timing logs (`em_b.timing` logger) |
 | `timing_log_level` | `INFO` | Log level for the timing logger |
 
@@ -387,12 +388,29 @@ installs the single handler on `em_b`; it runs first in the lifespan and at the 
 of each `pipeline/*.py` `__main__` block. Anything new that runs standalone must call
 it too, or its INFO records are silently dropped.
 
-One destination, never both:
+One main destination, never both:
 
-- **Console** — dev (`dev-up.ps1`, `uvicorn --reload`, `python -m pipeline.*`).
+- **Console** — dev (`dev-up.ps1`, `uvicorn --reload`, `python -m pipeline.*`). Plus
+  the **dev error log** (`DEV_ERROR_LOG`, on by default): WARNING+ records with
+  tracebacks, including uvicorn's unhandled-exception records, are copied to a
+  rotating `logs/errors.log` at the repo root (gitignored, created on the first
+  warning). It exists because console output is lost when the terminal closes. Read
+  it first when the dev app misbehaves.
 - **Rotating files** — when `LOG_DIR` is set or the app is frozen. `api.log` gets the
   `em_b.*` records **and** uvicorn's loggers, rerouted because `uvicorn.run` installs
-  console handlers before the lifespan. Set `LOG_DIR` in dev to test this path.
+  console handlers before the lifespan. Set `LOG_DIR` in dev to test this path. No
+  `errors.log` here; `api.log` already persists everything.
+
+Ollama failures: `llm.raise_for_ollama` keeps Ollama's own error message (the JSON
+`error` body that `raise_for_status` drops), and `generate_chat_stream` raises
+`OllamaError` on an in-stream `error` line or a stream that ends with no `done`
+chunk. A runner crash used to end the stream silently, with no log line.
+
+**GPU crash on the dev box:** the 0.40.7 Ollama runner (`llama-server.exe`) hits
+`ggml_vulkan: device lost` on the Arc 140V when it evaluates a chat-model prompt.
+It shows up as a Windows "Application Error" popup and an Ollama 500, and it once
+hung the whole system. Check `%LOCALAPPDATA%\Ollama\server.log` for `device lost`
+before you suspect app code. Don't send load tests to the GPU without asking.
 
 The Electron shell mirrors this: `electron.log` (shell events, wizard step
 transitions, Neo4j and API child stdout/stderr) in `<userData>/logs` when packaged,

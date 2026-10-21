@@ -66,6 +66,8 @@ usb-staging.zip
 
 #test outputs and logs
 test_output.txt
+# Dev error log (src/core/logging_config.py writes logs/errors.log from source)
+logs/
 
 # Neo4j database dumps, of any database. `neo4j-admin database dump` names the
 # file after the database, so a full backup also produces system.dump, and the

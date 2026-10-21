@@ -27,6 +27,19 @@ def reset_rate_limiter():
 
 
 @pytest.fixture(autouse=True)
+def no_dev_error_log(monkeypatch):
+    """Keep tests from writing ``logs/errors.log`` into the repo.
+
+    Any test whose code path runs ``configure_logging`` (the lifespan does) would
+    otherwise copy its expected warnings into the developer's real error log.
+    Tests of the error log itself turn it back on with a temp directory.
+    """
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "dev_error_log", False)
+
+
+@pytest.fixture(autouse=True)
 def restore_logging_state():
     """Undo any logging configuration a test performs.
 

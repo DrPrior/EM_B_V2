@@ -204,6 +204,16 @@ class Settings(BaseSettings):
         default=5,
         description="Rotated api.log files kept (api.log.1 … api.log.N).",
     )
+    dev_error_log: bool = Field(
+        default=True,
+        description=(
+            "In console (dev) mode, also write WARNING-and-above records, with "
+            "tracebacks, to a rotating logs/errors.log at the repo root, so a "
+            "crash leaves a trace after the terminal is closed. uvicorn's "
+            "unhandled-exception records go there too. No effect in file mode "
+            "(LOG_DIR set, or frozen), where api.log already persists everything."
+        ),
+    )
     timing_log_enabled: bool = Field(
         default=True,
         description=(

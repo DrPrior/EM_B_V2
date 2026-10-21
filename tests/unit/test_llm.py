@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from src.services.llm import (
+    OllamaError,
     generate_chat_response,
     generate_chat_stream,
     generate_response,
@@ -88,3 +89,74 @@ def test_generate_chat_stream_yields_tokens_until_done() -> None:
     # Reasoning off so streamed `message.content` tokens actually arrive.
     _, kwargs = p.call_args
     assert kwargs["json"]["think"] is False
+
+
+def _ollama_500(body: dict) -> MagicMock:
+    mock_response = MagicMock()
+    mock_response.raise_for_status.side_effect = requests.HTTPError(
+        "500 Server Error: Internal Server Error for url: http://localhost:11434"
+    )
+    mock_response.json.return_value = body
+    mock_response.__enter__.return_value = mock_response
+    mock_response.__exit__.return_value = False
+    return mock_response
+
+
+def test_http_error_carries_ollama_error_message() -> None:
+    mock_response = _ollama_500({"error": "llama runner process has terminated"})
+
+    with patch("src.services.llm.requests.post", return_value=mock_response):
+        with pytest.raises(requests.HTTPError) as excinfo:
+            generate_chat_response([])
+
+    assert "500 Server Error" in str(excinfo.value)
+    assert "llama runner process has terminated" in str(excinfo.value)
+
+
+def test_http_error_falls_back_to_body_text_when_not_json() -> None:
+    mock_response = _ollama_500({})
+    mock_response.json.side_effect = ValueError("not json")
+    mock_response.text = "upstream gone"
+
+    with patch("src.services.llm.requests.post", return_value=mock_response):
+        with pytest.raises(requests.HTTPError, match="upstream gone"):
+            generate_response("p")
+
+
+def test_generate_chat_stream_raises_on_http_error_with_detail() -> None:
+    mock_response = _ollama_500({"error": "device lost"})
+
+    with patch("src.services.llm.requests.post", return_value=mock_response):
+        with pytest.raises(requests.HTTPError, match="device lost"):
+            list(generate_chat_stream([]))
+
+
+def _stream(lines: list[bytes]) -> MagicMock:
+    mock_response = MagicMock()
+    mock_response.iter_lines.return_value = iter(lines)
+    mock_response.raise_for_status.return_value = None
+    mock_response.__enter__.return_value = mock_response
+    mock_response.__exit__.return_value = False
+    return mock_response
+
+
+def test_generate_chat_stream_raises_on_in_stream_error() -> None:
+    # Ollama has already sent 200, so a runner failure arrives as an error line.
+    lines = [
+        b'{"message": {"content": "Haz"}, "done": false}',
+        b'{"error": "llama runner process has terminated"}',
+    ]
+
+    with patch("src.services.llm.requests.post", return_value=_stream(lines)):
+        stream = generate_chat_stream([])
+        assert next(stream) == "Haz"
+        with pytest.raises(OllamaError, match="llama runner process has terminated"):
+            next(stream)
+
+
+def test_generate_chat_stream_raises_when_stream_ends_without_done() -> None:
+    lines = [b'{"message": {"content": "Haz"}, "done": false}']
+
+    with patch("src.services.llm.requests.post", return_value=_stream(lines)):
+        with pytest.raises(OllamaError, match="ended before"):
+            list(generate_chat_stream([]))

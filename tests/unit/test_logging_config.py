@@ -121,3 +121,99 @@ def test_explicit_log_dir_wins_over_frozen_default(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(settings, "log_dir", str(tmp_path / "chosen"))
 
     assert logging_config.resolve_log_dir() == tmp_path / "chosen"
+
+
+@pytest.fixture
+def dev_error_log(monkeypatch, tmp_path: Path) -> Path:
+    """Turn the dev error log on, pointed at a temp directory."""
+    monkeypatch.setattr(settings, "dev_error_log", True)
+    monkeypatch.setattr(logging_config.paths, "dev_error_log_dir", lambda: tmp_path)
+    return tmp_path / logging_config.ERROR_LOG_FILENAME
+
+
+def _error_handler(logger_name: str) -> logging.Handler:
+    (handler,) = [
+        h
+        for h in logging.getLogger(logger_name).handlers
+        if h.get_name() == logging_config._ERROR_HANDLER_NAME
+    ]
+    return handler
+
+
+def test_dev_error_log_records_warnings_with_traceback(
+    dev_error_log: Path, capsys
+) -> None:
+    logging_config.configure_logging()
+    logger = logging.getLogger("em_b.chat")
+    logger.info("routine")
+    try:
+        raise RuntimeError("runner crashed")
+    except RuntimeError:
+        logger.exception("Chat stream failed")
+
+    _error_handler("em_b").flush()
+    content = dev_error_log.read_text(encoding="utf-8")
+    assert "ERROR    em_b.chat  Chat stream failed" in content
+    assert "RuntimeError: runner crashed" in content
+    assert "routine" not in content
+    # The console still gets everything.
+    out = capsys.readouterr().out
+    assert "routine" in out
+    assert "Chat stream failed" in out
+
+
+def test_dev_error_log_is_not_created_until_needed(dev_error_log: Path) -> None:
+    logging_config.configure_logging()
+    logging.getLogger("em_b.main").info("startup ok")
+
+    assert not dev_error_log.exists()
+
+
+def test_dev_error_log_captures_uvicorn_errors_and_keeps_its_console(
+    dev_error_log: Path,
+) -> None:
+    uvicorn_console = logging.StreamHandler(sys.stdout)
+    logging.getLogger("uvicorn").addHandler(uvicorn_console)
+
+    logging_config.configure_logging()
+    logging.getLogger("uvicorn.error").error("Exception in ASGI application")
+
+    assert uvicorn_console in logging.getLogger("uvicorn").handlers
+    assert _error_handler("uvicorn") is _error_handler("em_b")
+    _error_handler("uvicorn").flush()
+    assert "Exception in ASGI application" in dev_error_log.read_text(encoding="utf-8")
+
+
+def test_dev_error_log_reconfiguring_does_not_stack(dev_error_log: Path) -> None:
+    logging_config.configure_logging()
+    logging_config.configure_logging()
+
+    assert len(_app_handlers()) == 2
+    names = [h.get_name() for h in logging.getLogger("uvicorn").handlers]
+    assert names.count(logging_config._ERROR_HANDLER_NAME) == 1
+
+
+def test_dev_error_log_off_removes_it(monkeypatch, dev_error_log: Path) -> None:
+    logging_config.configure_logging()
+    monkeypatch.setattr(settings, "dev_error_log", False)
+
+    logging_config.configure_logging()
+
+    assert len(_app_handlers()) == 1
+    assert all(
+        h.get_name() != logging_config._ERROR_HANDLER_NAME
+        for h in logging.getLogger("uvicorn").handlers
+    )
+
+
+def test_file_mode_has_no_dev_error_log(
+    monkeypatch, tmp_path: Path, dev_error_log: Path
+) -> None:
+    monkeypatch.setattr(settings, "log_dir", str(tmp_path / "logs"))
+
+    logging_config.configure_logging()
+    logging.getLogger("em_b.main").error("goes to api.log only")
+
+    (handler,) = _app_handlers()
+    assert handler.get_name() == logging_config._HANDLER_NAME
+    assert not dev_error_log.exists()

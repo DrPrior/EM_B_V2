@@ -7,6 +7,34 @@ from src.core.config import settings
 from src.core.timing import log_ollama, parse_ollama_timings
 
 
+class OllamaError(RuntimeError):
+    """Ollama failed partway through a streamed response.
+
+    Ollama has already answered 200 by then, so the failure arrives as an
+    ``error`` field in the stream, or as the stream ending with no ``done``
+    chunk (the runner process died).
+    """
+
+
+def raise_for_ollama(response: requests.Response) -> None:
+    """Like ``raise_for_status``, but keeps Ollama's own error message.
+
+    ``raise_for_status`` reports only the status line ("500 Server Error ...");
+    the reason (e.g. the model runner crashing) is in the JSON body's ``error``
+    field, and without it the logs can't say why a call failed.
+    """
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        try:
+            detail = response.json().get("error") or response.text
+        except ValueError:
+            detail = response.text
+        raise requests.HTTPError(
+            f"{e} (Ollama: {str(detail)[:500]})", response=response
+        ) from e
+
+
 def generate_response(
     prompt: str,
     session_id: str | None = None,
@@ -45,7 +73,7 @@ def generate_response(
     if format_json:
         payload["format"] = "json"
     response = requests.post(url, json=payload)
-    response.raise_for_status()
+    raise_for_ollama(response)
     body = response.json()
     log_ollama("generate", settings.chat_model, parse_ollama_timings(body), session_id)
     return body.get("response", "")
@@ -77,7 +105,7 @@ def generate_chat_response(messages: list[dict], session_id: str | None = None) 
         },
     }
     response = requests.post(url, json=payload)
-    response.raise_for_status()
+    raise_for_ollama(response)
     body = response.json()
     log_ollama("chat", settings.chat_model, parse_ollama_timings(body), session_id)
     return body.get("message", {}).get("content", "")
@@ -94,6 +122,10 @@ def generate_chat_stream(
 
     Yields:
         Individual token strings as the model generates them.
+
+    Raises:
+        requests.HTTPError: Ollama rejected the request outright.
+        OllamaError: Ollama failed after the stream had started.
     """
     url = f"{settings.ollama_base_url}/api/chat"
     payload = {
@@ -111,11 +143,13 @@ def generate_chat_stream(
         },
     }
     with requests.post(url, json=payload, stream=True) as response:
-        response.raise_for_status()
+        raise_for_ollama(response)
         for line in response.iter_lines():
             if not line:
                 continue
             chunk = json.loads(line)
+            if "error" in chunk:
+                raise OllamaError(f"Ollama chat stream failed: {chunk['error']}")
             token = chunk.get("message", {}).get("content", "")
             if token:
                 yield token
@@ -125,3 +159,5 @@ def generate_chat_stream(
                     "chat", settings.chat_model, parse_ollama_timings(chunk), session_id
                 )
                 break
+        else:
+            raise OllamaError("Ollama chat stream ended before the response completed")

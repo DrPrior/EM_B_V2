@@ -80,6 +80,11 @@ CREATE CONSTRAINT unique_access_level IF NOT EXISTS
 FOR (a:Access) REQUIRE a.level IS UNIQUE;
 """
 
+# Vector size produced by embedding-model (embeddinggemma). INDEX_VECTOR_CHUNK
+# below must use the same number; tests/unit/test_schema.py pins that. A chunk
+# whose embedding has any other size is silently left out of the vector index.
+EMBEDDING_DIMENSIONS = 768
+
 # Add a vector index for chunk embeddings (dimensions match embeddinggemma: 768)
 INDEX_VECTOR_CHUNK = """
 CREATE VECTOR INDEX chunk_vector_idx IF NOT EXISTS
@@ -321,6 +326,50 @@ WITH doc, c ORDER BY c.sequence
 WITH doc, collect(c.text)[0] AS first_chunk_text
 RETURN doc.filepath AS filepath, doc.filename AS filename, first_chunk_text
 """
+
+
+# ==========================================
+# 7. EMBEDDING DIMENSION CHECK / RE-EMBED
+# ==========================================
+
+# Histogram of chunk embedding sizes; `dims` is null for a chunk with none.
+COUNT_CHUNK_EMBEDDING_SIZES = """
+MATCH (c:Chunk)
+RETURN size(c.embedding) AS dims, count(*) AS n
+"""
+
+# Chunks the vector index can't see: no embedding, or one of the wrong size.
+# $skip holds ids that already failed this run, so they aren't refetched forever.
+FETCH_CHUNKS_TO_REEMBED = """
+MATCH (c:Chunk)
+WHERE (c.embedding IS NULL OR size(c.embedding) <> $dims)
+  AND c.text IS NOT NULL
+  AND NOT c.chunk_id IN $skip
+RETURN c.chunk_id AS chunk_id, c.text AS text
+LIMIT $limit
+"""
+
+SET_CHUNK_EMBEDDINGS = """
+UNWIND $rows AS row
+MATCH (c:Chunk {chunk_id: row.chunk_id})
+SET c.embedding = row.embedding
+"""
+
+
+def chunk_embedding_sizes(driver: Driver) -> dict[int | None, int]:
+    """Count chunks by embedding size (``None`` = no embedding stored).
+
+    Args:
+        driver: An open Neo4j driver.
+
+    Returns:
+        Mapping of embedding length to number of chunks with that length.
+    """
+    with driver.session() as session:
+        records = session.execute_read(
+            lambda tx: list(tx.run(COUNT_CHUNK_EMBEDDING_SIZES))
+        )
+    return {record["dims"]: record["n"] for record in records}
 
 
 def setup_constraints(driver: Driver) -> None:

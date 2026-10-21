@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI  # type: ignore[import-untyped]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-untyped]
+from neo4j import Driver  # type: ignore[import-untyped]
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -16,11 +17,54 @@ from src.core.logging_config import configure_logging
 from src.core.paths import static_dir
 from src.core.rate_limit import limiter
 from src.database.connection import Neo4jConnection
-from src.database.schema import setup_constraints
+from src.database.schema import (
+    EMBEDDING_DIMENSIONS,
+    chunk_embedding_sizes,
+    setup_constraints,
+)
 from src.routers import admin, chat, files, graph
 from src.services.ollama_bootstrap import OllamaUnavailableError, bootstrap
 
 logger = logging.getLogger("em_b.main")
+
+
+def _check_embedding_dimensions(driver: Driver) -> None:
+    """Log an ERROR when stored chunk embeddings don't fit the vector index.
+
+    Neo4j leaves a vector of the wrong size out of the index without any error,
+    so a graph embedded by an older model (qwen3-embedding, 2560-d) answers every
+    question with no retrieved context. This makes that state loud at startup.
+    It never blocks startup: the API still serves whatever is searchable.
+
+    Args:
+        driver: An open Neo4j driver.
+    """
+    try:
+        sizes = chunk_embedding_sizes(driver)
+    except Exception:
+        logger.warning("Could not check chunk embedding sizes", exc_info=True)
+        return
+
+    total = sum(sizes.values())
+    unusable = {dims: n for dims, n in sizes.items() if dims != EMBEDDING_DIMENSIONS}
+    if not unusable:
+        logger.info(
+            "Chunk embeddings OK: %d chunks, all %d-d", total, EMBEDDING_DIMENSIONS
+        )
+        return
+
+    by_size = ", ".join(
+        f"{n} with none" if dims is None else f"{n} at {dims}-d"
+        for dims, n in unusable.items()
+    )
+    logger.error(
+        "%d of %d chunks have embeddings the %d-d vector index can't use (%s); "
+        "retrieval will not find them. Fix with: python -m pipeline.reembed",
+        sum(unusable.values()),
+        total,
+        EMBEDDING_DIMENSIONS,
+        by_size,
+    )
 
 
 @asynccontextmanager
@@ -57,6 +101,7 @@ async def lifespan(app: FastAPI):
 
         setup_constraints(connection.get_driver())
         logger.info("Database schema constraints and indexes initialized")
+        _check_embedding_dimensions(connection.get_driver())
     except ValueError:
         logger.exception("Failed to initialize Neo4j connection")
         raise

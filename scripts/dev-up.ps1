@@ -69,7 +69,7 @@ foreach ($required in @('NEO4J_AUTH', 'DB_URI')) {
 Write-Host "Loaded $($loaded.Count) vars from .env" -ForegroundColor Green
 
 # --- 2. Pre-flight checks (non-fatal; the API lifespan re-verifies) ---
-$ollamaBase = if ($loaded.ContainsKey('OLLAMA_BASE_URL')) { $loaded['OLLAMA_BASE_URL'] } else { 'http://localhost:11434' }
+$ollamaBase = if ($loaded.ContainsKey('OLLAMA_BASE_URL')) { $loaded['OLLAMA_BASE_URL'] } else { 'http://127.0.0.1:11434' }
 try {
     Invoke-RestMethod -Uri "$ollamaBase/api/version" -TimeoutSec 5 | Out-Null
     Write-Host "Ollama reachable at $ollamaBase" -ForegroundColor Green

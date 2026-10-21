@@ -18,11 +18,13 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = Field(
-        default="http://localhost:11434",
+        default="http://127.0.0.1:11434",
         description=(
             "Base URL for the host-native Ollama API. The app runs natively and "
             "reaches Ollama over loopback; override via OLLAMA_BASE_URL only for a "
-            "non-default host or port."
+            "non-default host or port. Use 127.0.0.1, not localhost: Ollama listens "
+            "on IPv4 only, and on Windows 'localhost' tries IPv6 ::1 first, which "
+            "adds ~2 s to every call before falling back."
         ),
     )
     chat_model: str = Field(

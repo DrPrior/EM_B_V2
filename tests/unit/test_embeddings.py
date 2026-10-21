@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.services.embeddings import embed_and_store_chunk, generate_embedding
+from src.services.embeddings import (
+    QUERY_PREFIX,
+    embed_and_store_chunk,
+    generate_embedding,
+    generate_query_embedding,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -48,9 +53,7 @@ def test_generate_embedding_propagates_http_error() -> None:
 def test_embed_and_store_chunk_writes_when_vector_present() -> None:
     session = MagicMock()
 
-    with patch(
-        "src.services.embeddings.generate_embedding", return_value=[0.1, 0.2]
-    ):
+    with patch("src.services.embeddings.generate_embedding", return_value=[0.1, 0.2]):
         embed_and_store_chunk("text", "chunk-1", session)
 
     session.execute_write.assert_called_once()
@@ -66,3 +69,31 @@ def test_embed_and_store_chunk_skips_empty_vector() -> None:
         embed_and_store_chunk("text", "chunk-1", session)
 
     session.execute_write.assert_not_called()
+
+
+def test_query_embedding_adds_embeddinggemma_query_prefix() -> None:
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"embedding": [0.1]}
+    mock_response.raise_for_status.return_value = None
+
+    with patch(
+        "src.services.embeddings.requests.post", return_value=mock_response
+    ) as p:
+        generate_query_embedding("define hazard mitigation")
+
+    _, kwargs = p.call_args
+    assert kwargs["json"]["prompt"] == (
+        "task: search result | query: define hazard mitigation"
+    )
+    assert QUERY_PREFIX == "task: search result | query: "
+
+
+def test_stored_chunks_are_embedded_without_the_query_prefix() -> None:
+    # The cutoffs are calibrated for prefixed questions against raw chunk text;
+    # prefixing documents too would shift every score.
+    with patch(
+        "src.services.embeddings.generate_embedding", return_value=[0.1]
+    ) as embed:
+        embed_and_store_chunk("chunk text", "c1", MagicMock())
+
+    embed.assert_called_once_with("chunk text")

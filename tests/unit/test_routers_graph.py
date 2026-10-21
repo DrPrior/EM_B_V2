@@ -86,7 +86,7 @@ def test_vector_search_returns_results(client: TestClient, mock_session) -> None
     ]
 
     with patch.object(
-        graph_router, "generate_embedding", return_value=[0.1] * 768
+        graph_router, "generate_query_embedding", return_value=[0.1] * 768
     ):
         resp = client.post("/graph/search", json={"query": "hello", "top_k": 3})
 
@@ -98,7 +98,9 @@ def test_vector_search_embedding_failure_returns_500(
     client: TestClient, mock_session
 ) -> None:
     with patch.object(
-        graph_router, "generate_embedding", side_effect=RuntimeError("ollama down")
+        graph_router,
+        "generate_query_embedding",
+        side_effect=RuntimeError("ollama down"),
     ):
         resp = client.post("/graph/search", json={"query": "hello"})
 

@@ -22,6 +22,30 @@ def generate_embedding(text: str, session_id: str | None = None) -> list[float]:
     return body.get("embedding", [])
 
 
+# embeddinggemma's prompt for the query side of retrieval. Stored chunks are
+# embedded as raw text (ingest.py, reembed.py); only questions get this prefix.
+# Measured on the dev corpus: it lifts on-topic top-1 scores (median 0.795 →
+# 0.819) and drops off-topic ones (max 0.740 → 0.605), so a cutoff can separate
+# them; without it the two ranges overlap. The retrieval cutoffs in config.py
+# are calibrated for prefixed questions — change both together.
+QUERY_PREFIX = "task: search result | query: "
+
+
+def generate_query_embedding(
+    question: str, session_id: str | None = None
+) -> list[float]:
+    """Embed a user question for retrieval against the stored chunk embeddings.
+
+    Args:
+        question: The user's question (or search text).
+        session_id: Conversation id used to correlate timing logs across stages.
+
+    Returns:
+        The question's embedding vector.
+    """
+    return generate_embedding(f"{QUERY_PREFIX}{question}", session_id=session_id)
+
+
 def _store_embedding_tx(
     tx: ManagedTransaction, chunk_id: str, embedding: list[float]
 ) -> None:

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from src.database.connection import Neo4jConnection
 from src.models import NodeResponse, SearchResponse
-from src.services.embeddings import generate_embedding
+from src.services.embeddings import generate_query_embedding
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 logger = logging.getLogger("em_b.graph")
@@ -281,7 +281,7 @@ def vector_search(
         HTTPException: 500 if embedding generation or database query fails.
     """
     try:
-        query_vector = generate_embedding(request.query)
+        query_vector = generate_query_embedding(request.query)
     except Exception as e:
         logger.exception("Failed to generate embedding for vector search")
         raise HTTPException(

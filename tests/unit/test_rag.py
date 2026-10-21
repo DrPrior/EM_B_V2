@@ -58,7 +58,7 @@ def test_vector_only_retrieval_builds_context(isolated_store) -> None:
     ]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         sid, messages, sources = service._retrieve_and_build_messages(
@@ -81,11 +81,11 @@ def test_vector_results_below_min_score_excluded(isolated_store) -> None:
     db = MagicMock()
     db.run.return_value = [
         _vector_record("c1", "high", 0.9, "a.pdf"),
-        _vector_record("c2", "low", 0.5, "b.pdf"),  # below 0.75 floor
+        _vector_record("c2", "low", 0.5, "b.pdf"),  # below the 0.65 floor
     ]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         _, _, sources = service._retrieve_and_build_messages("q", db, None)
@@ -116,7 +116,7 @@ def test_graph_results_appended_after_vector(isolated_store) -> None:
     }
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=entities),
     ):
         _, _, sources = service._retrieve_and_build_messages("q", db, None)
@@ -151,7 +151,7 @@ def test_duplicate_chunk_id_deduped(isolated_store) -> None:
     }
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=entities),
     ):
         _, _, sources = service._retrieve_and_build_messages("q", db, None)
@@ -165,7 +165,7 @@ def test_graph_failure_degrades_to_vector_only(isolated_store) -> None:
     db.run.return_value = [_vector_record("c1", "vector chunk", 0.9, "vec.pdf")]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch(
             "src.services.rag.extract_entities",
             side_effect=RuntimeError("LLM down"),
@@ -182,7 +182,7 @@ def test_no_context_produces_fallback_prompt(isolated_store) -> None:
     db.run.return_value = []
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         _, messages, sources = service._retrieve_and_build_messages("q", db, None)
@@ -206,7 +206,7 @@ def test_superseded_source_is_annotated_not_filtered(isolated_store) -> None:
     ]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         _, messages, sources = service._retrieve_and_build_messages("q", db, None)
@@ -241,7 +241,7 @@ def test_non_superseded_source_omits_supersede_field(isolated_store) -> None:
     ]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         _, messages, sources = service._retrieve_and_build_messages("q", db, None)
@@ -265,7 +265,7 @@ def test_multiple_superseders_deduped_and_joined(isolated_store) -> None:
     ]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         _, _, sources = service._retrieve_and_build_messages("q", db, None)
@@ -279,7 +279,7 @@ def test_question_is_delimiter_wrapped_with_context(isolated_store) -> None:
     db.run.return_value = [_vector_record("c1", "some context", 0.9, "a.pdf")]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         _, messages, _ = service._retrieve_and_build_messages(
@@ -301,7 +301,7 @@ def test_question_is_delimiter_wrapped_without_context(isolated_store) -> None:
     db.run.return_value = []
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         _, messages, _ = service._retrieve_and_build_messages("hello", db, None)
@@ -320,7 +320,8 @@ def test_embedding_failure_raises_http_500(isolated_store) -> None:
     db = MagicMock()
 
     with patch(
-        "src.services.rag.generate_embedding", side_effect=RuntimeError("ollama down")
+        "src.services.rag.generate_query_embedding",
+        side_effect=RuntimeError("ollama down"),
     ):
         with pytest.raises(HTTPException) as exc:
             service._retrieve_and_build_messages("q", db, None)
@@ -334,7 +335,7 @@ def test_answer_question_stores_turn(isolated_store) -> None:
     db.run.return_value = [_vector_record("c1", "ctx", 0.9, "a.pdf")]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
         patch("src.services.rag.generate_chat_response", return_value="the answer"),
     ):
@@ -353,7 +354,7 @@ def test_stream_answer_stores_full_answer_after_exhaustion(isolated_store) -> No
     db.run.return_value = [_vector_record("c1", "ctx", 0.9, "a.pdf")]
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
         patch(
             "src.services.rag.generate_chat_stream",
@@ -379,7 +380,7 @@ def test_graph_failure_is_logged_as_warning(isolated_store, caplog) -> None:
     caplog.set_level(logging.INFO, logger="em_b")
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch(
             "src.services.rag.extract_entities",
             side_effect=RuntimeError("LLM down"),
@@ -401,7 +402,7 @@ def test_question_text_not_logged_at_info(isolated_store, caplog) -> None:
     caplog.set_level(logging.INFO, logger="em_b")
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         service._retrieve_and_build_messages("my private question", db, None)
@@ -420,10 +421,39 @@ def test_question_text_logged_at_debug(isolated_store, caplog) -> None:
     caplog.set_level(logging.DEBUG, logger="em_b")
 
     with (
-        patch("src.services.rag.generate_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
         patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
     ):
         service._retrieve_and_build_messages("my private question", db, None)
 
     debug = [r for r in caplog.records if r.levelno == logging.DEBUG]
     assert any("my private question" in r.getMessage() for r in debug)
+
+
+def test_vector_query_overfetches_then_keeps_top_k_distinct(
+    isolated_store, monkeypatch
+) -> None:
+    # The approximate index misses the best chunks at small k, so it is asked
+    # for retrieval_candidates and the result is cut back to retrieval_top_k.
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "retrieval_top_k", 3)
+    monkeypatch.setattr(settings, "retrieval_candidates", 10)
+    service = RAGService()
+    db = MagicMock()
+    db.run.return_value = [
+        _vector_record("c1", "first", 0.90, "a.pdf"),
+        _vector_record("c2", "first", 0.89, "a-copy.pdf"),  # same text: skipped
+        _vector_record("c3", "second", 0.85, "b.pdf"),
+        _vector_record("c4", "third", 0.80, "c.pdf"),  # fills the freed slot
+        _vector_record("c5", "fourth", 0.79, "d.pdf"),  # beyond top_k
+    ]
+
+    with (
+        patch("src.services.rag.generate_query_embedding", return_value=[0.1] * 768),
+        patch("src.services.rag.extract_entities", return_value=EMPTY_ENTITIES),
+    ):
+        _, _, sources = service._retrieve_and_build_messages("q", db, None)
+
+    assert db.run.call_args.kwargs["top_k"] == 10
+    assert [s["filename"] for s in sources] == ["a.pdf", "b.pdf", "c.pdf"]

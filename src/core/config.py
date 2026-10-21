@@ -114,6 +114,16 @@ class Settings(BaseSettings):
         default=3,
         description="Number of chunks to retrieve via vector search per query",
     )
+    retrieval_candidates: int = Field(
+        default=10,
+        description=(
+            "Candidates requested from the vector index before the score floor, "
+            "de-duplication and the retrieval_top_k cut. The index is approximate "
+            "(HNSW, binary-quantized) and misses the best chunks at small k: at "
+            "k=3, 'What is a POD?' got 0.642 against an exact best of 0.685. At "
+            "k=10 it matched exact search on every question tested."
+        ),
+    )
     answer_max_tokens: int = Field(
         default=700,
         description=(
@@ -132,17 +142,23 @@ class Settings(BaseSettings):
         default=64,
         description="Token overlap between consecutive chunks during ingestion",
     )
+    # Both cutoffs are calibrated for embeddinggemma with the query prefix in
+    # embeddings.QUERY_PREFIX (Neo4j cosine scores, 0-1). On a 32-question set
+    # against the dev corpus, top-1 scores were 0.685-0.880 for on-topic
+    # questions and 0.553-0.605 for off-topic ones; 0.65 splits the gap. Change
+    # the embedding model or prefix and these need re-measuring.
     vector_retrieval_min_score: float = Field(
-        default=0.75,
+        default=0.65,
         description=(
             "Minimum cosine similarity for vector chunks to be included in context"
         ),
     )
     graph_retrieval_min_score: float = Field(
-        default=0.78,
+        default=0.68,
         description=(
             "Minimum cosine similarity for graph-augmented chunks to be included "
-            "in context"
+            "in context. Kept a little above the vector floor: these chunks are "
+            "added on top of the vector results, matched by entity name."
         ),
     )
     graph_retrieval_limit: int = Field(

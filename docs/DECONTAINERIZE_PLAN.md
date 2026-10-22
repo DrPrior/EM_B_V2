@@ -221,10 +221,12 @@ Ollama returns to binding loopback only.
     `chunk_vector_idx`; measured ~5 s where `/health` is green but vector search
     returns nothing, longer on slow laptops. Either keep the index when its
     dimensions match, or make `/health` (or the supervisor) wait for `ONLINE`.
-  - *Deprecated vector procedure.* Neo4j 2026.08.1 flags
+  - *Deprecated vector procedure.* **Done (2026-10-22).** Neo4j 2026.08.1 flags
     `db.index.vector.queryNodes` as deprecated in favour of the Cypher `SEARCH`
-    clause. It works, but logs a long warning per chat into `api.log`, and a
-    future Neo4j may remove it.
+    clause, and it logged a long warning per chat into `api.log`. Both vector
+    queries (`rag._VECTOR_QUERY`, `/graph/search`) now use `CYPHER 25` + `SEARCH`,
+    with the same results and scores as before on the dev Enterprise server.
+    Still to confirm on Community 2026.08.1 at the next release build.
   - *Formatting.* `ruff format` would restyle `pipeline/load_manifest.py` and six
     test files. Style only; do it after signing, because any change to shipped
     Python means a rebuild.

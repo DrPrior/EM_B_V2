@@ -314,6 +314,22 @@ def vector_search(
         ) from e
 
 
+# Cypher 25 SEARCH clause, replacing the deprecated db.index.vector.queryNodes.
+# See _VECTOR_QUERY in src/services/rag.py for why the version is pinned.
+_VECTOR_SEARCH_QUERY = """
+CYPHER 25
+MATCH (node:Chunk)
+  SEARCH node IN (
+    VECTOR INDEX chunk_vector_idx
+    FOR $embedding
+    LIMIT $top_k
+  ) SCORE AS score
+RETURN elementId(node) AS id, labels(node) AS labels,
+       properties(node) AS props, score
+ORDER BY score DESC
+"""
+
+
 def _query_vector_search(
     tx: ManagedTransaction, embedding: list[float], top_k: int
 ) -> list[Record]:
@@ -327,11 +343,5 @@ def _query_vector_search(
     Returns:
         List of records with matching nodes and their similarity scores.
     """
-    query = """
-    CALL db.index.vector.queryNodes('chunk_vector_idx', $top_k, $embedding)
-    YIELD node, score
-    RETURN elementId(node) as id, labels(node) as labels,
-           properties(node) as props, score
-    """
-    result = tx.run(query, embedding=embedding, top_k=top_k)
+    result = tx.run(_VECTOR_SEARCH_QUERY, embedding=embedding, top_k=top_k)
     return list(result)

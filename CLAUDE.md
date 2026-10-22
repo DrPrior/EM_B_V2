@@ -285,15 +285,18 @@ All Cypher lives as module-level string constants in [src/database/schema.py](sr
 (constraints, the `chunk_vector_idx` vector index, and every MERGE/LINK/FETCH).
 `setup_constraints(driver)` is called from the FastAPI lifespan, so an empty
 database is fine on first boot. The vector features used
-(`db.index.vector.queryNodes`, `vector.similarity.cosine`) are Neo4j **core** —
+(the Cypher 25 `SEARCH` clause, `vector.similarity.cosine`) are Neo4j **core** —
 no APOC/GDS plugin, so native Neo4j works with no extra install.
+Vector queries start with `CYPHER 25`, because `SEARCH` exists only in Cypher 25
+and the shipped server sets no `db.query.default_language`. Don't go back to
+`db.index.vector.queryNodes`: 2026.08 deprecates it and logs a warning on every chat.
 
 ### RAG pipeline ([src/services/rag.py](src/services/rag.py))
 
 Every chat request runs `_retrieve_and_build_messages()`:
 
 1. Embed the question via `generate_query_embedding()`, which prepends embeddinggemma's query prompt (`task: search result | query: `). Stored chunks stay raw text. Both cutoffs are calibrated for that asymmetry, so change them together.
-2. Vector search: `db.index.vector.queryNodes('chunk_vector_idx', retrieval_candidates, embedding)`, filtered by `settings.vector_retrieval_min_score`, de-duplicated, then cut to `retrieval_top_k`. The index is approximate (HNSW, binary-quantized) and misses the best chunks at k=3, hence the over-fetch.
+2. Vector search: the Cypher 25 `SEARCH` clause over `chunk_vector_idx` (`LIMIT retrieval_candidates`), filtered by `settings.vector_retrieval_min_score`, de-duplicated, then cut to `retrieval_top_k`. The index is approximate (HNSW, binary-quantized) and misses the best chunks at k=3, hence the over-fetch.
 3. Entity extraction: `extract_entities()` (LLM call via `/api/generate`) pulls concepts, organizations, and legal references from the question
 4. Graph traversal: finds chunks linked to those entities, scores them with `vector.similarity.cosine()`, filtered by `settings.graph_retrieval_min_score`
 5. Merge: vector results first, graph results appended — deduped by both `chunk_id` and the first 200 chars of text

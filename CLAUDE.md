@@ -292,8 +292,8 @@ no APOC/GDS plugin, so native Neo4j works with no extra install.
 
 Every chat request runs `_retrieve_and_build_messages()`:
 
-1. Embed the question via `generate_embedding()` (Ollama `/api/embeddings`)
-2. Vector search: `db.index.vector.queryNodes('chunk_vector_idx', top_k, embedding)`, filtered by `settings.vector_retrieval_min_score`
+1. Embed the question via `generate_query_embedding()`, which prepends embeddinggemma's query prompt (`task: search result | query: `). Stored chunks stay raw text. Both cutoffs are calibrated for that asymmetry, so change them together.
+2. Vector search: `db.index.vector.queryNodes('chunk_vector_idx', retrieval_candidates, embedding)`, filtered by `settings.vector_retrieval_min_score`, de-duplicated, then cut to `retrieval_top_k`. The index is approximate (HNSW, binary-quantized) and misses the best chunks at k=3, hence the over-fetch.
 3. Entity extraction: `extract_entities()` (LLM call via `/api/generate`) pulls concepts, organizations, and legal references from the question
 4. Graph traversal: finds chunks linked to those entities, scores them with `vector.similarity.cosine()`, filtered by `settings.graph_retrieval_min_score`
 5. Merge: vector results first, graph results appended — deduped by both `chunk_id` and the first 200 chars of text
@@ -356,9 +356,10 @@ reads them from `os.environ` directly.
 | Setting | Default | Purpose |
 |---|---|---|
 | `retrieval_top_k` | 3 | Vector results per query |
+| `retrieval_candidates` | 10 | Candidates fetched from the approximate index before the floor/dedupe/top-k cut |
 | `answer_max_tokens` | 700 | Cap (`num_predict`) on chat answer length — bounds the dominant generation-latency cost on GPU-limited hosts |
-| `vector_retrieval_min_score` | 0.75 | Floor for vector chunk inclusion |
-| `graph_retrieval_min_score` | 0.78 | Floor for graph chunk inclusion |
+| `vector_retrieval_min_score` | 0.65 | Floor for vector chunk inclusion. On a 32-question set, on-topic top-1 was 0.685-0.880 and off-topic 0.553-0.605 (prefixed queries) |
+| `graph_retrieval_min_score` | 0.68 | Floor for graph chunk inclusion (same cosine scale as the index score) |
 | `graph_retrieval_limit` | 2 | Max graph-augmented chunks per query |
 | `chunk_max_tokens` | 512 | Ingestion chunk size (~4 chars/token) |
 | `chunk_overlap_tokens` | 64 | Overlap between consecutive chunks |

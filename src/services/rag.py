@@ -10,7 +10,7 @@ from neo4j import Session  # type: ignore[import-untyped]
 from pipeline.extract import extract_entities
 from src.core.config import settings
 from src.core.timing import log_rag_stages, timed
-from src.services.embeddings import generate_embedding
+from src.services.embeddings import generate_query_embedding
 from src.services.llm import generate_chat_response, generate_chat_stream
 from src.services.session import conversation_store
 
@@ -181,7 +181,7 @@ class RAGService:
 
         try:
             with timed("embed", stage_ms):
-                question_vector = generate_embedding(question, session_id=sid)
+                question_vector = generate_query_embedding(question, session_id=sid)
         except Exception as e:
             logger.exception("Embedding the question failed (sid=%s)", sid)
             raise HTTPException(
@@ -194,7 +194,7 @@ class RAGService:
                 db_session.run(
                     _VECTOR_QUERY,
                     embedding=question_vector,
-                    top_k=settings.retrieval_top_k,
+                    top_k=max(settings.retrieval_candidates, settings.retrieval_top_k),
                 )
             )
 
@@ -234,7 +234,11 @@ class RAGService:
         seen_texts: set[str] = set()
         merged: list[dict] = []
 
+        # The index is over-fetched (retrieval_candidates); keep the best
+        # retrieval_top_k distinct chunks. Records arrive in descending score.
         for r in vector_records:
+            if len(merged) >= settings.retrieval_top_k:
+                break
             if r["score"] < settings.vector_retrieval_min_score:
                 continue
             cid = r["chunk_id"]

@@ -24,8 +24,8 @@ def test_settings_defaults_match_documented_values(
     assert settings.answer_max_tokens == 700
     assert settings.chunk_max_tokens == 512
     assert settings.chunk_overlap_tokens == 64
-    assert settings.vector_retrieval_min_score == 0.75
-    assert settings.graph_retrieval_min_score == 0.78
+    assert settings.vector_retrieval_min_score == 0.65
+    assert settings.graph_retrieval_min_score == 0.68
     assert settings.graph_retrieval_limit == 2
     assert settings.rate_limit_per_minute == 20
 

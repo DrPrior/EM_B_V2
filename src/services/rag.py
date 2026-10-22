@@ -118,15 +118,26 @@ def _file_url(filepath: str | None) -> str | None:
     return f"/files/{quote(rel)}"
 
 
+# The Cypher 25 SEARCH clause replaces db.index.vector.queryNodes, which Neo4j
+# 2026.08 deprecates (and logged a warning for on every chat). SEARCH exists only
+# in Cypher 25, so the version is pinned here rather than left to the server's
+# db.query.default_language. ORDER BY keeps rows in score order through the
+# collect() aggregation, which the retrieval_top_k cut relies on.
 _VECTOR_QUERY = """
-CALL db.index.vector.queryNodes('chunk_vector_idx', $top_k, $embedding)
-YIELD node, score
+CYPHER 25
+MATCH (node:Chunk)
+  SEARCH node IN (
+    VECTOR INDEX chunk_vector_idx
+    FOR $embedding
+    LIMIT $top_k
+  ) SCORE AS score
 OPTIONAL MATCH (doc:File)-[:HAS_CHUNK]->(node)
 OPTIONAL MATCH (newer:File)-[:SUPERSEDES]->(doc)
 WITH node, score, doc, collect(coalesce(newer.title, newer.filename)) AS superseders
 RETURN node.chunk_id AS chunk_id, node.text AS text, score,
        coalesce(doc.filename, 'Unknown') AS filename, doc.filepath AS filepath,
        superseders
+ORDER BY score DESC
 """
 
 _GRAPH_QUERY = """

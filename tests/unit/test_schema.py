@@ -31,3 +31,30 @@ def test_vector_index_matches_embedding_dimensions() -> None:
     assert f"`vector.dimensions`: {schema.EMBEDDING_DIMENSIONS}," in (
         schema.INDEX_VECTOR_CHUNK
     )
+
+
+def test_vector_queries_use_search_clause_pinned_to_cypher_25() -> None:
+    # db.index.vector.queryNodes is deprecated in Neo4j 2026.08. SEARCH exists
+    # only in Cypher 25, and the shipped Community server sets no default
+    # language, so the version must be pinned in the query itself.
+    from src.routers import graph
+    from src.services import rag
+
+    for query in (rag._VECTOR_QUERY, graph._VECTOR_SEARCH_QUERY):
+        assert query.lstrip().startswith("CYPHER 25\n")
+        assert "SEARCH node IN" in query
+        assert "VECTOR INDEX chunk_vector_idx" in query
+        assert "ORDER BY score DESC" in query
+
+
+def test_no_code_calls_the_deprecated_vector_procedure() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = [
+        str(path.relative_to(root))
+        for folder in ("src", "pipeline")
+        for path in (root / folder).rglob("*.py")
+        if "db.index.vector.queryNodes(" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
